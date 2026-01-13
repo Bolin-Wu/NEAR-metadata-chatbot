@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+.env
+
+# Data & indexes
+chroma_metadata_db/
+metadata_excels/
+*.xlsx  # or remove if you want to include sample Excels
+
+# Secrets
+.streamlit/secrets.toml
