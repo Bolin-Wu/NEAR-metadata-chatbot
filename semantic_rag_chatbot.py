@@ -23,9 +23,11 @@ st.set_page_config(page_title="Semantic RAG Excel Chatbot", layout="wide")
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"  # fast & good quality
 CHROMA_DIR = "./chroma_excel_db"  # persistent folder
 
-# Your Grok API key (store securely in .env or Streamlit secrets)
-# For demo: you can replace with free local LLM like Ollama
-GROQ_API_KEY = os.getenv("GROQ_api_key")
+# Grok API key (store securely in .env or Streamlit secrets)
+try:
+    GROQ_API_KEY = st.secrets["GROQ_api_key"]
+except Exception:
+    GROQ_API_KEY = os.getenv("GROQ_api_key")
 
 # ── Functions ─────────────────────────────────────────────────────────────────
 @st.cache_resource(show_spinner="Preparing embeddings model...")
