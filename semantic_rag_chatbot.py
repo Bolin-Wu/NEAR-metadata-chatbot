@@ -181,7 +181,7 @@ with col_clear:
         st.rerun()
 
 with col_reset:
-    if st.button("Reset Index & Chat"):
+    if st.button("Reset Index & Chats"):
         st.session_state.messages = []
         if "vectorstore" in st.session_state:
             del st.session_state.vectorstore
