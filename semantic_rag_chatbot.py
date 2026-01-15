@@ -173,9 +173,18 @@ if prompt := st.chat_input("Ask about your Excel metadata..."):
 
     st.session_state.messages.append({"role": "assistant", "content": response})
 
-# Cleanup button
-if st.button("Clear Chat & Reset"):
-    st.session_state.messages = []
-    if "vectorstore" in st.session_state:
-        del st.session_state.vectorstore
-    st.rerun()
+# Cleanup buttons
+col_clear, col_reset = st.columns(2)
+with col_clear:
+    if st.button("Clear Chat"):
+        st.session_state.messages = []
+        st.rerun()
+
+with col_reset:
+    if st.button("Reset Index & Chat"):
+        st.session_state.messages = []
+        if "vectorstore" in st.session_state:
+            del st.session_state.vectorstore
+        if "file_hash" in st.session_state:
+            del st.session_state.file_hash
+        st.rerun()
