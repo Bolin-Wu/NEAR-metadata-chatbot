@@ -76,13 +76,16 @@ def process_excel_to_vectorstore(file_path: str):
 # ── Main App ──────────────────────────────────────────────────────────────────
 FILE_UPLOADER_KEY = "excel_uploader"
 
+if "reset_counter" not in st.session_state:
+    st.session_state.reset_counter = 0
+
 st.title("🧠 Semantic RAG Chatbot with Excel")
 st.markdown("Upload your metadata Excel → ask natural questions!")
 
 uploaded_file = st.file_uploader(
     "Upload Excel file (.xlsx)",
     type=["xlsx"],
-    key=FILE_UPLOADER_KEY,
+    key=f"{FILE_UPLOADER_KEY}_{st.session_state.reset_counter}",
 )
 
 ## check file hash to avoid reprocessing same file
@@ -195,6 +198,5 @@ with col_reset:
             del st.session_state.vectorstore
         if "file_hash" in st.session_state:
             del st.session_state.file_hash
-        if FILE_UPLOADER_KEY in st.session_state:
-            st.session_state[FILE_UPLOADER_KEY] = None
+        st.session_state.reset_counter += 1
         st.rerun()
