@@ -1,5 +1,6 @@
 import os
 import hashlib
+import shutil
 
 
 import streamlit as st
@@ -41,7 +42,7 @@ def process_excel_to_vectorstore(file_path: str):
     
     documents = []
     
-    safe_source = os.path.basename(file_path) or "uploaded_file.xlsx"
+    safe_source = "uploaded_excel.xlsx"  # Generic, non-sensitive source name
 
     for sheet_name, df in excel_data.items():
         # Convert dataframe to text representation (you can customize this)
@@ -177,7 +178,7 @@ if prompt := st.chat_input("Ask about your Excel metadata..."):
 
                 with st.expander("Sources used"):
                     for doc in retriever.invoke(prompt):
-                        st.caption(f"Sheet/Source: {doc.metadata.get('sheet', 'unknown')}")
+                        st.caption(f"Sheet: {doc.metadata.get('sheet', 'unknown')} (from uploaded Excel)")
                         st.write(doc.page_content[:300] + "...")
 
         st.markdown(response)
@@ -198,5 +199,7 @@ with col_reset:
             del st.session_state.vectorstore
         if "file_hash" in st.session_state:
             del st.session_state.file_hash
+        if os.path.exists(CHROMA_DIR):
+            shutil.rmtree(CHROMA_DIR)  # Clear persistent vectorstore
         st.session_state.reset_counter += 1
         st.rerun()
