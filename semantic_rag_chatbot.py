@@ -41,6 +41,8 @@ def process_excel_to_vectorstore(file_path: str):
     
     documents = []
     
+    safe_source = os.path.basename(file_path) or "uploaded_file.xlsx"
+
     for sheet_name, df in excel_data.items():
         # Convert dataframe to text representation (you can customize this)
         text = f"Sheet: {sheet_name}\n\n" + df.to_string(index=False)
@@ -48,7 +50,7 @@ def process_excel_to_vectorstore(file_path: str):
         # Create LangChain Document
         doc = Document(
             page_content=text,
-            metadata={"source": file_path, "sheet": sheet_name}
+            metadata={"source": safe_source, "sheet": sheet_name}
         )
         documents.append(doc)
     
@@ -72,10 +74,16 @@ def process_excel_to_vectorstore(file_path: str):
     return vectorstore
 
 # ── Main App ──────────────────────────────────────────────────────────────────
+FILE_UPLOADER_KEY = "excel_uploader"
+
 st.title("🧠 Semantic RAG Chatbot with Excel")
 st.markdown("Upload your metadata Excel → ask natural questions!")
 
-uploaded_file = st.file_uploader("Upload Excel file (.xlsx)", type=["xlsx"])
+uploaded_file = st.file_uploader(
+    "Upload Excel file (.xlsx)",
+    type=["xlsx"],
+    key=FILE_UPLOADER_KEY,
+)
 
 ## check file hash to avoid reprocessing same file
 def compute_file_hash(uploaded_file):
@@ -187,4 +195,6 @@ with col_reset:
             del st.session_state.vectorstore
         if "file_hash" in st.session_state:
             del st.session_state.file_hash
+        if FILE_UPLOADER_KEY in st.session_state:
+            st.session_state[FILE_UPLOADER_KEY] = None
         st.rerun()
