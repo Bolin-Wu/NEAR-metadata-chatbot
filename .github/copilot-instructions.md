@@ -13,15 +13,16 @@
 
 ## Runtime patterns & conventions
 
-- Session state is the primary state container: `vectorstore`, `file_hash`, `df`, and `messages` live in `st.session_state`.
+- Session state is the primary state container: `vectorstore`, `file_hash`, and `messages` live in `st.session_state` for the RAG app; the demo app uses `st.session_state.df`.
 - File reprocessing is avoided by hashing the uploaded file (`compute_file_hash`) and resetting `vectorstore` only when the hash changes.
 - Use `st.cache_resource` for model and vectorstore setup (see `get_embeddings()` and `process_excel_to_vectorstore()`).
-- Source transparency: the RAG app shows retrieved chunks in a “Sources used” expander.
+- Source transparency: the RAG app shows retrieved chunks in a “Sources used” expander and sanitizes `Document.metadata.source` to a filename (see `safe_source` in [semantic_rag_chatbot.py](semantic_rag_chatbot.py)).
+- The file uploader uses a fixed key (`FILE_UPLOADER_KEY`) so reset actions can clear the upload state (see [semantic_rag_chatbot.py](semantic_rag_chatbot.py)).
 
 ## Developer workflows
 
-- Install deps: `pip install -r requirements.txt` (see [requirements.txt](requirements.txt)).
-- Run apps with Streamlit: `streamlit run semantic_rag_chatbot.py` (or `demo_chatbot.py` / `app.py`).
+- Use uv for dependency management: `uv sync` (see [pyproject.toml](pyproject.toml) and [uv.lock](uv.lock)).
+- Run apps with Streamlit via uv: `uv run streamlit run semantic_rag_chatbot.py` (or `demo_chatbot.py` / `app.py`).
 
 ## When editing
 

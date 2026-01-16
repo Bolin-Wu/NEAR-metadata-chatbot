@@ -1,0 +1,40 @@
+Metadata-Version: 2.4
+Name: near-metadata-chatbot
+Version: 0.1.0
+Summary: Streamlit-based Excel metadata chatbot with semantic RAG.
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: streamlit>=1.30
+Requires-Dist: pandas>=2.0
+Requires-Dist: python-dotenv>=1.0
+Requires-Dist: openpyxl>=3.1.2
+Requires-Dist: langchain-core>=0.2.0
+Requires-Dist: langchain-community>=0.2.0
+Requires-Dist: langchain-text-splitters>=0.2.0
+Requires-Dist: langchain-huggingface>=0.0.3
+Requires-Dist: langchain-groq>=0.1.0
+Requires-Dist: chromadb>=0.5.0
+Requires-Dist: sentence-transformers>=2.2.2
+Dynamic: license-file
+
+# NEAR metadata chatbot
+
+Streamlit-based Excel metadata chatbot with a semantic RAG flow in
+[semantic_rag_chatbot.py](semantic_rag_chatbot.py).
+
+## Setup (uv)
+
+- Create the environment and install deps from the lockfile:
+  - `uv sync`
+
+## Run
+
+- Main RAG app:
+  - `uv run streamlit run semantic_rag_chatbot.py`
+- Demo rule-based app:
+  - `uv run streamlit run demo_chatbot.py`
+
+## Configuration
+
+- Set `GROQ_api_key` in `.env` or Streamlit secrets.
