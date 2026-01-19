@@ -1,1 +1,3 @@
-chroma_excel_db
+app
+demo_chatbot
+semantic_rag_chatbot
