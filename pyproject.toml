@@ -21,3 +21,6 @@ dependencies = [
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["app", "semantic_rag_chatbot", "demo_chatbot"]
