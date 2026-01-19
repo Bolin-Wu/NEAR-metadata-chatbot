@@ -57,8 +57,8 @@ def process_excel_to_vectorstore(file_path: str):
     
     # Split into smaller chunks (important for better retrieval)
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=800,
-        chunk_overlap=100,
+        chunk_size=400,
+        chunk_overlap=50,
         length_function=len
     )
     chunks = text_splitter.split_documents(documents)
@@ -152,8 +152,7 @@ if prompt := st.chat_input("Ask about your Excel metadata..."):
                     model_name="llama-3.1-8b-instant",
                     temperature=0.1,
                 )
-                prompt_template = """You are a metadata expert. Use only the following Excel context to answer.
-                Be precise, quote sources when possible.
+                prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata. Use only the provided Excel context from cohort studies to answer questions accurately and precisely. Cite sources (e.g., sheet names, variable names, or specific data points) when possible. Provide insights relevant to epidemiological research, such as study designs, variable definitions, or potential confounders. If the context is insufficient for a complete answer, suggest refining the query or uploading additional data.
 
                 Context: {context}
 
@@ -165,7 +164,7 @@ if prompt := st.chat_input("Ask about your Excel metadata..."):
                     template=prompt_template, input_variables=["context", "question"]
                 )
 
-                retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+                retriever = vectorstore.as_retriever(search_kwargs={"k": 8})
 
                 rag_chain = (
                     {"context": retriever, "question": RunnablePassthrough()}
