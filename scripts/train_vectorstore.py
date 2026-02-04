@@ -89,8 +89,8 @@ def process_xmls_to_vectorstore(data_dir: str, database_name: str = None):
     
     # Split into smaller chunks
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=200,
-        chunk_overlap=0,
+        chunk_size=500,
+        chunk_overlap=50,
         separators=["Variable:", "\n\n", "\n"]
     )
     chunks = text_splitter.split_documents(documents)

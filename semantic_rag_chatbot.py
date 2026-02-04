@@ -55,7 +55,7 @@ def load_vectorstore():
 
 # ── Main App ──────────────────────────────────────────────────────────────────
 
-st.title("🧠 Semantic RAG Chatbot with XML Metadata")
+st.title("🧠 Semantic RAG Chatbot with Metadata")
 st.markdown("Ask natural questions about NEAR metadata!")
 
 # Try to load existing vector store
@@ -85,7 +85,7 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-if prompt := st.chat_input("Ask about your XML metadata..."):
+if prompt := st.chat_input("Ask about your metadata..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
@@ -102,9 +102,21 @@ if prompt := st.chat_input("Ask about your XML metadata..."):
                     model_name="llama-3.1-8b-instant",
                     temperature=0.1,
                 )
-                prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata. Use only the provided XML context from cohort studies to answer questions accurately and precisely. Cite sources (e.g., file names, variable names, or specific data points) when possible. Provide insights relevant to epidemiological research, such as study designs, variable definitions, or potential confounders. If the context is insufficient for a complete answer, suggest refining the query or uploading additional data.
+                prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata. 
 
-                Context: {context}
+                Your task is to answer questions about variables and metadata from cohort studies using ONLY the provided context.
+
+                IMPORTANT: 
+                - Summarize and synthesize the information from the context into clear, readable text
+                - NEVER start your answer by copying raw variable data or definitions
+                - Extract key insights: variable names, labels, categories, and relationships
+                - Use a narrative format with proper sentences and paragraphs
+                - Cite specific variable names when relevant but don't quote raw metadata
+                - Group related variables by theme or category
+                - If the context is insufficient, clearly state that and suggest refining the query
+
+                Context from database:
+                {context}
 
                 Question: {question}
 
