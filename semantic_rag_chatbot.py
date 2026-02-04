@@ -1,10 +1,7 @@
 import os
-import hashlib
 import shutil
 
-
 import streamlit as st
-import pandas as pd
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
@@ -13,16 +10,18 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from langchain_groq import ChatGroq  
 from langchain_core.prompts import PromptTemplate
-import tempfile
 from dotenv import load_dotenv
+
+from scripts.xml_parser import parse_xml_to_text
 load_dotenv()
 
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-st.set_page_config(page_title="Semantic RAG Excel Chatbot", layout="wide")
+st.set_page_config(page_title="Semantic RAG XML Metadata Chatbot", layout="wide")
 
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"  # fast & good quality
-CHROMA_DIR = "./chroma_excel_db"  # persistent folder
+CHROMA_DIR = "./chroma_xml_db"  # persistent folder
+DATA_DIR = "./data/SNAC-K"  # Folder containing XML files (now includes all subfolders)
 
 # Grok API key (store securely in .env or Streamlit secrets)
 try:
@@ -35,97 +34,112 @@ except Exception:
 def get_embeddings():
     return HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
 
-@st.cache_resource(show_spinner="Building vector store...")
-def process_excel_to_vectorstore(file_path: str):
-    # Read all sheets
-    excel_data = pd.read_excel(file_path, sheet_name=None)
+@st.cache_resource(show_spinner="Loading or building vector store...")
+def process_xmls_to_vectorstore(data_dir: str):
+    import glob
+    import hashlib
+    
+    def get_files_hash(data_dir):
+        files = []
+        json_file = os.path.join(data_dir, "snac-k.json")
+        if os.path.exists(json_file):
+            files.append(json_file)
+        xml_files = glob.glob(os.path.join(data_dir, "*.xml"))  # Remove recursive=True
+        files.extend(xml_files)
+        
+        hasher = hashlib.md5()
+        for f in sorted(files):
+            with open(f, 'rb') as file:
+                hasher.update(file.read())
+        return hasher.hexdigest()
+    
+    current_hash = get_files_hash(data_dir)
+    hash_file = os.path.join(CHROMA_DIR, "files_hash.txt")
+    
+    embeddings = get_embeddings()
+    
+    # Check if hash matches and try to load existing
+    if os.path.exists(hash_file):
+        with open(hash_file, 'r') as f:
+            stored_hash = f.read().strip()
+        if stored_hash == current_hash:
+            try:
+                vectorstore = Chroma(
+                    persist_directory=CHROMA_DIR,
+                    embedding_function=embeddings,
+                    collection_name="xml_metadata"
+                )
+                if vectorstore._collection.count() > 0:
+                    return vectorstore
+            except Exception:
+                pass  # Proceed to rebuild if loading fails
+    
+    # Build from scratch if hash changed or loading failed
+    xml_files = glob.glob(os.path.join(data_dir, "*.xml"))  # Remove recursive=True
     
     documents = []
     
-    safe_source = "uploaded_excel.xlsx"  # Generic, non-sensitive source name
-
-    for sheet_name, df in excel_data.items():
-        # Convert dataframe to text representation (you can customize this)
-        text = f"Sheet: {sheet_name}\n\n" + df.to_string(index=False)
-        
-        # Create LangChain Document
+    # Add the JSON description file
+    json_file = os.path.join(data_dir, "snac-k.json")
+    if os.path.exists(json_file):
+        with open(json_file, 'r', encoding='utf-8') as f:
+            json_text = f.read()
         doc = Document(
-            page_content=text,
-            metadata={"source": safe_source, "sheet": sheet_name}
+            page_content=f"Database Description: {json_text}",
+            metadata={"source": json_file, "file": "snac-k.json"}
         )
         documents.append(doc)
     
-    # Split into smaller chunks (important for better retrieval)
+    if not xml_files and not documents:
+        raise FileNotFoundError(f"No XML or JSON files found in {data_dir}")
+    
+    for file_path in xml_files:
+        file_name = os.path.basename(file_path)
+        
+        text = parse_xml_to_text(file_path)
+        
+        doc = Document(
+            page_content=text,
+            metadata={"source": file_path, "file": file_name}
+        )
+        documents.append(doc)
+    
+    # Split into smaller chunks
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=400,
-        chunk_overlap=50,
-        length_function=len
+        chunk_size=200,  # Smaller, since each variable is self-contained
+        chunk_overlap=0,  # Small overlap to maintain context
+        separators=["Variable:", "\n\n", "\n"]  # Split on Variable first
     )
     chunks = text_splitter.split_documents(documents)
     
     # Create embeddings and store
-    embeddings = get_embeddings()
     vectorstore = Chroma.from_documents(
         documents=chunks,
         embedding=embeddings,
         persist_directory=CHROMA_DIR,
-        collection_name="excel_metadata"
+        collection_name="xml_metadata"
     )
+    
+    # Save the new hash
+    with open(hash_file, 'w') as f:
+        f.write(current_hash)
     
     return vectorstore
 
 # ── Main App ──────────────────────────────────────────────────────────────────
-FILE_UPLOADER_KEY = "excel_uploader"
 
-if "reset_counter" not in st.session_state:
-    st.session_state.reset_counter = 0
+st.title("🧠 Semantic RAG Chatbot with XML Metadata")
+st.markdown("Ask natural questions about your local XML metadata!")
 
-st.title("🧠 Semantic RAG Chatbot with Excel")
-st.markdown("Upload your metadata Excel → ask natural questions!")
-
-uploaded_file = st.file_uploader(
-    "Upload Excel file (.xlsx)",
-    type=["xlsx"],
-    key=f"{FILE_UPLOADER_KEY}_{st.session_state.reset_counter}",
-)
-
-## check file hash to avoid reprocessing same file
-def compute_file_hash(uploaded_file):
-    if uploaded_file is None:
-        return None
-    hash_md5 = hashlib.md5()
-    uploaded_file.seek(0)
-    for chunk in iter(lambda: uploaded_file.read(4096), b""):
-        hash_md5.update(chunk)
-    uploaded_file.seek(0)
-    return hash_md5.hexdigest()
-
-file_hash = compute_file_hash(uploaded_file)
-
-if file_hash is not None and (
-    "file_hash" not in st.session_state or st.session_state.file_hash != file_hash
-):
-    st.session_state.vectorstore = None  # Reset vector store
-    st.session_state.file_hash = file_hash
-
-if uploaded_file is not None:
-    # Save temporarily
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp_file:
-        tmp_file.write(uploaded_file.getvalue())
-        tmp_path = tmp_file.name
-    
-    try:
-        if st.session_state.get("vectorstore") is None:
-            with st.spinner("Processing Excel → creating semantic index..."):
-                st.session_state.vectorstore = process_excel_to_vectorstore(tmp_path)
-            st.success("Semantic index ready! You can now ask questions.")
-    finally:
-        os.unlink(tmp_path)  # Delete temp file after processing
-    
-    # Optional: show preview
-    if st.checkbox("Show data preview"):
-        df_preview = pd.read_excel(uploaded_file, nrows=10)
-        st.dataframe(df_preview)
+# Load vector store on startup (pre-built from ./data/)
+try:
+    vectorstore = process_xmls_to_vectorstore(DATA_DIR)
+    st.session_state.vectorstore = vectorstore
+    st.success("Vector store loaded from local XMLs! Ready to chat.")
+except Exception as e:
+    st.error(f"Error loading vector store: {e}. Check your {DATA_DIR} folder and XML files.")
+    vectorstore = None
+    st.session_state.vectorstore = None
 
 # ── Chat ──────────────────────────────────────────────────────────────────────
 if "messages" not in st.session_state:
@@ -135,7 +149,7 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-if prompt := st.chat_input("Ask about your Excel metadata..."):
+if prompt := st.chat_input("Ask about your XML metadata..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
@@ -143,7 +157,7 @@ if prompt := st.chat_input("Ask about your Excel metadata..."):
     with st.chat_message("assistant"):
         vectorstore = st.session_state.get("vectorstore")
         if vectorstore is None:
-            st.warning("Please upload an Excel file first!")
+            st.warning("Vector store not loaded. Check your data folder!")
             response = ""
         else:
             with st.spinner("Thinking..."):
@@ -152,7 +166,7 @@ if prompt := st.chat_input("Ask about your Excel metadata..."):
                     model_name="llama-3.1-8b-instant",
                     temperature=0.1,
                 )
-                prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata. Use only the provided Excel context from cohort studies to answer questions accurately and precisely. Cite sources (e.g., sheet names, variable names, or specific data points) when possible. Provide insights relevant to epidemiological research, such as study designs, variable definitions, or potential confounders. If the context is insufficient for a complete answer, suggest refining the query or uploading additional data.
+                prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata. Use only the provided XML context from cohort studies to answer questions accurately and precisely. Cite sources (e.g., file names, variable names, or specific data points) when possible. Provide insights relevant to epidemiological research, such as study designs, variable definitions, or potential confounders. If the context is insufficient for a complete answer, suggest refining the query or uploading additional data.
 
                 Context: {context}
 
@@ -177,7 +191,7 @@ if prompt := st.chat_input("Ask about your Excel metadata..."):
 
                 with st.expander("Sources used"):
                     for doc in retriever.invoke(prompt):
-                        st.caption(f"Sheet: {doc.metadata.get('sheet', 'unknown')} (from uploaded Excel)")
+                        st.caption(f"File: {doc.metadata.get('file', 'unknown')} (from {doc.metadata.get('source', 'unknown')})")
                         st.write(doc.page_content[:300] + "...")
 
         st.markdown(response)
@@ -194,11 +208,6 @@ with col_clear:
 with col_reset:
     if st.button("Reset Index & Chats"):
         st.session_state.messages = []
-        if "vectorstore" in st.session_state:
-            del st.session_state.vectorstore
-        if "file_hash" in st.session_state:
-            del st.session_state.file_hash
         if os.path.exists(CHROMA_DIR):
             shutil.rmtree(CHROMA_DIR)  # Clear persistent vectorstore
-        st.session_state.reset_counter += 1
         st.rerun()

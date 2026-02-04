@@ -12,8 +12,6 @@ Streamlit-based Excel metadata chatbot with a semantic RAG flow in
 
 - Main RAG app:
   - `uv run streamlit run semantic_rag_chatbot.py`
-- Demo rule-based app:
-  - `uv run streamlit run demo_chatbot.py`
 
 ## Configuration
 
