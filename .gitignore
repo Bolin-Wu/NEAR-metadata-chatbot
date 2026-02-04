@@ -7,14 +7,23 @@ __pycache__/
 venv/
 .venv/
 .env
+.env.local
 
-# Data & indexes
+# Vector store database (large, regenerated on each run)
+chroma_xml_db/
 chroma_metadata_db/
 chroma_excel_db/
+*.db
+*.sqlite3
+
+# Data & indexes
 metadata_excels/
-*.xlsx  # or remove if you want to include sample Excels
+*.xlsx  
 data/
 
 
+# OS
+.DS_Store
+Thumbs.db
 # Secrets
 .streamlit/secrets.toml
