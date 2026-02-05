@@ -1,7 +1,5 @@
 LICENSE
 README.md
-app.py
-demo_chatbot.py
 pyproject.toml
 semantic_rag_chatbot.py
 near_metadata_chatbot.egg-info/PKG-INFO

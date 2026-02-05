@@ -5,7 +5,7 @@ import time
 
 import streamlit as st
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.output_parsers import StrOutputParser
@@ -14,7 +14,6 @@ from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
 from dotenv import load_dotenv
 
-from scripts.xml_parser import parse_xml_to_text
 load_dotenv()
 
 
@@ -52,7 +51,6 @@ def load_vectorstore():
             st.error(f"Error loading vector store: {e}")
     
     return None
-
 # ── Main App ──────────────────────────────────────────────────────────────────
 
 st.title("🧠 Semantic RAG Chatbot with Metadata")
@@ -102,18 +100,39 @@ if prompt := st.chat_input("Ask about your metadata..."):
                     model_name="llama-3.1-8b-instant",
                     temperature=0.1,
                 )
-                prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata. 
+                prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata.
 
                 Your task is to answer questions about variables and metadata from cohort studies using ONLY the provided context.
 
-                IMPORTANT: 
-                - Summarize and synthesize the information from the context into clear, readable text
-                - NEVER start your answer by copying raw variable data or definitions
-                - Extract key insights: variable names, labels, categories, and relationships
-                - Use a narrative format with proper sentences and paragraphs
-                - Cite specific variable names when relevant but don't quote raw metadata
-                - Group related variables by theme or category
-                - If the context is insufficient, clearly state that and suggest refining the query
+                CRITICAL INSTRUCTIONS - FOLLOW THESE STRICTLY:
+                1. NEVER copy or paste raw variable definitions, metadata blocks, or XML data into your answer
+                2. ALWAYS extract the key information and rewrite it in your own narrative sentences
+                3. When listing related variables, present them in a clear table format (see below)
+                4. Include variable names and their labels
+                5. Include categories when available
+                6. Group related variables by theme or category
+                7. Cite cohort/wave/table information when relevant
+                8. If context is insufficient, clearly state that and suggest refining the query
+
+                START YOUR ANSWER DIRECTLY WITH YOUR NARRATIVE - DO NOT INCLUDE ANY RAW DATA AT THE BEGINNING.
+
+                TABLE FORMAT FOR VARIABLES:
+                If there are multiple related variables, use this markdown table format:
+
+                | Variable Name | Label | Categories |
+                |---|---|---|
+                | SN3B15_5 | Choice of transportation to/from work | Motorcycle/Moped, Car, Bus, Train, Bicycle, Walking |
+                | SN3B15_6 | Frequency of using transportation | Daily, Several times per week, Weekly |
+
+                Example of CORRECT full answer:
+                "In the SNAC-K cohort, several variables relate to mobility and transportation. These variables assess different aspects of how participants move and travel.
+
+                | Variable Name | Label | Categories |
+                |---|---|---|
+                | SN3B15_5 | Choice of transportation to/from work | Motorcycle/Moped, Car, Bus, Train, Bicycle, Walking |
+                | SN3B15_6 | Frequency of using transportation | Daily, Several times per week, Weekly |
+
+                These variables are part of the Lifestyle Behaviours domain and are found in the SNAC-K_wave4_2010_c3 table. They help researchers understand..."
 
                 Context from database:
                 {context}
@@ -126,7 +145,7 @@ if prompt := st.chat_input("Ask about your metadata..."):
                     template=prompt_template, input_variables=["context", "question"]
                 )
 
-                retriever = vectorstore.as_retriever(search_kwargs={"k": 8})
+                retriever = vectorstore.as_retriever(search_kwargs={"k": 8})  
 
                 rag_chain = (
                     {"context": retriever, "question": RunnablePassthrough()}
@@ -139,7 +158,7 @@ if prompt := st.chat_input("Ask about your metadata..."):
 
                 with st.expander("Sources used"):
                     for doc in retriever.invoke(prompt):
-                        st.caption(f"File: {doc.metadata.get('file', 'unknown')} (from {doc.metadata.get('source', 'unknown')})")
+                        st.caption(f"File: {doc.metadata.get('file', 'unknown')}")
                         st.write(doc.page_content[:300] + "...")
 
         st.markdown(response)

@@ -14,7 +14,7 @@ Requires-Dist: langchain-community>=0.2.0
 Requires-Dist: langchain-text-splitters>=0.2.0
 Requires-Dist: langchain-huggingface>=0.0.3
 Requires-Dist: langchain-groq>=0.1.0
-Requires-Dist: chromadb>=0.5.0
+Requires-Dist: langchain-chroma>=0.1.0
 Requires-Dist: sentence-transformers>=2.2.2
 Dynamic: license-file
 
@@ -32,8 +32,6 @@ Streamlit-based Excel metadata chatbot with a semantic RAG flow in
 
 - Main RAG app:
   - `uv run streamlit run semantic_rag_chatbot.py`
-- Demo rule-based app:
-  - `uv run streamlit run demo_chatbot.py`
 
 ## Configuration
 

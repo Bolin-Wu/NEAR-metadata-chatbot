@@ -1,5 +1,6 @@
 import os
 import xml.etree.ElementTree as ET
+# import json
 
 def parse_xml_to_text(file_path: str) -> str:
     with open(file_path, 'r', encoding='utf-8') as f:
@@ -79,4 +80,14 @@ def parse_xml_to_text(file_path: str) -> str:
     for var in root.findall('variable'):
         extract_element_text(var)
     
-    return text
+    # Clean up formatting - add newlines between variables for better chunking
+    lines = text.split('\n')
+    cleaned_lines = []
+    for i, line in enumerate(lines):
+        cleaned_lines.append(line)
+        # Add blank line before new Variable entries (but not the first one)
+        if line.startswith('Variable:') and i > 0:
+            cleaned_lines.insert(-1, '')
+    
+    cleaned_text = '\n'.join(cleaned_lines).strip()
+    return cleaned_text

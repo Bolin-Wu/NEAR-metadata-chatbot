@@ -40,8 +40,6 @@ def get_available_databases():
 
 def process_xmls_to_vectorstore(data_dir: str, database_name: str = None):
     """Process XML files from the specified directory and create vector store."""
-    embeddings = get_embeddings()
-    
     xml_files = glob.glob(os.path.join(data_dir, "*.xml"))
     documents = []
     
@@ -56,7 +54,7 @@ def process_xmls_to_vectorstore(data_dir: str, database_name: str = None):
                 json_text = f.read()
             doc = Document(
                 page_content=f"Database Description: {json_text}",
-                metadata={"source": json_file, "file": os.path.basename(json_file), "database": database_name or "unknown"}
+                metadata={ "source": os.path.basename(json_file), "database": database_name or "unknown"}
             )
             documents.append(doc)
             print(f"  ✓ Loaded {os.path.basename(json_file)}")
@@ -71,11 +69,11 @@ def process_xmls_to_vectorstore(data_dir: str, database_name: str = None):
         file_name = os.path.basename(file_path)
         
         try:
-            text = parse_xml_to_text(file_path)
+            text = parse_xml_to_text(file_path)  # Already cleaned by parser
             
             doc = Document(
                 page_content=text,
-                metadata={"source": file_path, "file": file_name, "database": database_name or "unknown"}
+                metadata={"source": file_name, "database": database_name or "unknown"}
             )
             documents.append(doc)
             print(f"  ✓ Loaded {file_name}")
@@ -89,9 +87,9 @@ def process_xmls_to_vectorstore(data_dir: str, database_name: str = None):
     
     # Split into smaller chunks
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=50,
-        separators=["Variable:", "\n\n", "\n"]
+        chunk_size=600,  # Updated from 500
+        chunk_overlap=100,  # Updated from 50
+        separators=["Variable:", "\n\n", "\n", " "]  # Added space as fallback
     )
     chunks = text_splitter.split_documents(documents)
     print(f"  Total chunks: {len(chunks)}")
