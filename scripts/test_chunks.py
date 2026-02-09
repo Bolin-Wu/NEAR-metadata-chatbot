@@ -15,12 +15,17 @@ if xml_files:
         metadata={ "source": os.path.basename(file_path), "database": "SNAC-K"}
     )
     
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=300,
-        chunk_overlap=100,
-        separators=["Variable:", "\n\n", "\n", " "]
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=800,  # Updated from 500
+        chunk_overlap=150,  # Updated from 50
+            separators=[
+                "\n\n",  # Paragraph breaks first
+                "Variable:",  # Then variable definitions
+                "\n",  # Then line breaks
+                " "
+    ]
     )
-    chunks = splitter.split_documents([doc])
+    chunks = text_splitter.split_documents([doc])
     
     print(f"Total chunks: {len(chunks)}\n")
     for i, chunk in enumerate(chunks[:5]):
