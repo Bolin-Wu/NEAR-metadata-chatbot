@@ -112,23 +112,42 @@ if prompt := st.chat_input("Ask about your metadata..."):
                 )
                 prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata.
 
-                Your task is to answer questions about variables and metadata from cohort studies.
+                Your task is to answer questions about variables and metadata from cohort studies using ONLY the provided context.
 
-                CRITICAL INSTRUCTIONS:
-                1. Look at the retrieved context below
-                2. COMPLETELY REWRITE the answer in your own narrative sentences
-                3. NEVER include raw variable listings, XML data, or metadata blocks in your response
-                4. Always start with a clear, natural sentence explaining the topic
-                5. Only after explanation, present relevant variables in a clean table format and include categories when available.
-                6. Group related variables by theme or domain
+                CRITICAL INSTRUCTIONS - FOLLOW THESE STRICTLY:
+                1. NEVER copy or paste raw variable definitions, metadata blocks, or XML data into your answer
+                2. ALWAYS extract the key information and rewrite it in your own narrative sentences
+                3. When listing related variables, present them in a clear table format (see below)
+                4. Include variable names and their labels
+                5. Include categories when available
+                6. Group related variables by theme or category
+                7. Cite cohort/wave/table information when relevant
+                8. If context is insufficient, clearly state that and suggest refining the query
 
-                ### Retrieved Context:
+                START YOUR ANSWER DIRECTLY WITH YOUR NARRATIVE - DO NOT INCLUDE ANY RAW DATA AT THE BEGINNING.
+
+                TABLE FORMAT FOR VARIABLES:
+                If there are multiple related variables, use this markdown table format:
+
+                | Variable Name | Label | Categories |
+                |---|---|---|
+                | SN3B15_5 | Choice of transportation to/from work | Motorcycle/Moped, Car, Bus, Train, Bicycle, Walking |
+                | SN3B15_6 | Frequency of using transportation | Daily, Several times per week, Weekly |
+
+                Example of CORRECT full answer:
+                "In the SNAC-K cohort, several variables relate to mobility and transportation. These variables assess different aspects of how participants move and travel.
+
+                | Variable Name | Label | Categories |
+                |---|---|---|
+                | SN3B15_5 | Choice of transportation to/from work | Motorcycle/Moped, Car, Bus, Train, Bicycle, Walking |
+                | SN3B15_6 | Frequency of using transportation | Daily, Several times per week, Weekly |
+
+                These variables are part of the Lifestyle Behaviours domain and are found in the SNAC-K_wave4_2010_c3 table. They help researchers understand..."
+
+                Context from database:
                 {context}
 
-                ### Your Task:
                 Question: {question}
-
-                IMPORTANT: Your first sentence should be a natural explanation, NOT raw data. Rewrite everything in plain English.
 
                 Answer:"""
 
