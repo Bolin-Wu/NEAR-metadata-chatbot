@@ -191,9 +191,12 @@ if prompt := st.chat_input("Ask about your metadata..."):
                 | Variable Name | Original Table | Categories |
                 |---|---|---|
                 | variable_name | Table Name | Main value categories |
-
-                - Never include raw metadata formatting in your answer
-                - Always cite which cohort or data source you're referencing
+                
+                CRITICAL RULES:
+                - Column 1 MUST always show the variable NAME/ID (e.g., walk, dress, löpnr, kön)
+                - Column 2 MUST show what the variable measures in plain English
+                - Do NOT swap variable names with labels
+                - If the raw data shows "Variable: löpnr" then use "löpnr" in the table, NOT "Proband Number"
 
                 EXAMPLE OF CORRECT FORMAT:
                 "In SNAC-K, several variables measure basic demographics. Participants are identified by a unique proband number (löpnr). The cohort includes both men and women, tracked through a sex variable. Birth dates are recorded to calculate age.
