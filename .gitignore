@@ -10,9 +10,7 @@ venv/
 .env.local
 
 # Vector store database (large, regenerated on each run)
-chroma_xml_db/
-chroma_metadata_db/
-chroma_excel_db/
+chroma_prod_db/
 *.db
 *.sqlite3
 
