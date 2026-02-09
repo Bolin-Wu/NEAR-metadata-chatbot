@@ -11,8 +11,7 @@ venv/
 
 # Vector store database (large, regenerated on each run)
 chroma_prod_db/
-*.db
-*.sqlite3
+
 
 # Data & indexes
 metadata_excels/
