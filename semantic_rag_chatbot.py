@@ -183,35 +183,38 @@ if prompt := st.chat_input("Ask about your metadata..."):
                 - If multiple related variables exist from DIFFERENT TABLES/SOURCES, create TWO summary tables:
 
                 TABLE 1 - Variables by Content (what they measure):
-                | Variable Name | Label |
-                |---|---|
-                | variable_name | Description in plain English |
+                | Variable Name | Label | Categories |
+                |---|---|---|
+                | variable_name | What it measures in plain English | Category values if applicable |
 
                 TABLE 2 - Variable Availability Across Tables/Sources:
-                | Variable Name | Original Table | Categories |
+                | Variable Name | Original Table | Source file |
                 |---|---|---|
-                | variable_name | Table Name | Main value categories |
+                | variable_name | Table Name | File name |
                 
                 CRITICAL RULES:
-                - Column 1 MUST always show the variable NAME/ID (e.g., walk, dress, löpnr, kön)
-                - Column 2 MUST show what the variable measures in plain English
-                - Do NOT swap variable names with labels
-                - If the raw data shows "Variable: löpnr" then use "löpnr" in the table, NOT "Proband Number"
+                - Table 1, Column 1: MUST show the variable NAME/ID (e.g., walk, dress, löpnr, kön)
+                - Table 1, Column 2: MUST show what the variable measures in plain English
+                - Table 1, Column 3: MUST show category values (e.g., "1=man, 2=woman" or "N/A" if no categories)
+                - Table 2, Column 1: Variable NAME/ID
+                - Table 2, Column 2: Original Table name (e.g., SNAC-K_c1)
+                - Table 2, Column 3: Source file name (e.g., SNAC-K_Cohort1_Baseline.xml)
 
                 EXAMPLE OF CORRECT FORMAT:
                 "In SNAC-K, several variables measure basic demographics. Participants are identified by a unique proband number (löpnr). The cohort includes both men and women, tracked through a sex variable. Birth dates are recorded to calculate age.
 
-                | Variable Name | Label |
-                |---|---|
-                | löpnr | Unique participant identifier |
-                | kön | Participant's biological sex |
-                | Birthday | Date of birth for age calculation |
 
-                | Variable Name | Original Table | Categories |
+                | Variable Name | Label | Categories |
                 |---|---|---|
-                | löpnr | SNAC-K_c1 | Unique ID |
-                | kön | SNAC-K_c1 | 1=man, 2=woman |
-                | Birthday | SNAC-K_c1 | Date |"
+                | löpnr | Unique participant identifier | N/A (unique ID) |
+                | kön | Participant's biological sex | 1=man, 2=woman |
+                | Birthday | Date of birth for age calculation | Date format |
+
+                | Variable Name | Original Table | Source File |
+                |---|---|---|
+                | löpnr | SNAC-K_c1 | SNAC-K_Cohort1_Baseline.xml | 
+                | kön | SNAC-K_c1 | SNAC-K_Cohort1_Baseline.xml | 
+                | Birthday | SNAC-K_c1 | SNAC-K_Cohort1_Baseline.xml | 
 
                 Answer:"""
 
