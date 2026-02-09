@@ -179,9 +179,9 @@ if prompt := st.chat_input("Ask about your metadata..."):
                 {question}
 
                 ### Your Response Instructions:
-                - Start with a clear, natural explanation of the topic
+                - Start with a clear, natural explanation of the topic based on the related cohort background
                 - Use your own words to describe what the variables measure
-                - If multiple related variables exist from DIFFERENT TABLES/SOURCES, create TWO summary tables:
+                - Then, present the variable information in TWO separate markdown tables as specified below:
 
                 TABLE 1 - Variables by Content (what they measure):
                 | Variable Name | Label | Categories |
