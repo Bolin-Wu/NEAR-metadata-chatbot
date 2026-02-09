@@ -164,14 +164,6 @@ if prompt := st.chat_input("Ask about your metadata..."):
 
                 Your task is to answer questions about variables and metadata from this cohort.
 
-                IMPORTANT INSTRUCTIONS:
-                1. READ and UNDERSTAND the raw variable data below
-                2. COMPLETELY REWRITE it in natural, conversational language
-                3. NEVER quote or copy-paste the raw "Variable:", "Label:", "Original Table:", "Categories:" text
-                4. Group related variables by theme and by their original tables/sources
-                5. Explain what each variable measures in plain English
-                6. Extract source file names from the "File: xxx.xml" line at the TOP of each chunk
-
                 ### VARIABLE DATA:
                 {context}
 
@@ -179,27 +171,28 @@ if prompt := st.chat_input("Ask about your metadata..."):
                 {question}
 
                 ### Your Response Instructions:
+                - Group related variables by theme and by their original tables/sources
                 - Start with a clear, natural explanation of the topic based on the related cohort background
                 - Use your own words to describe what the variables measure
                 - Then, present the variable information in TWO separate markdown tables as specified below:
 
                 TABLE 1 - Variables by Content (what they measure):
-                | Variable Name | Label | Categories |
+                | Raw Variable Name | Label | Categories |
                 |---|---|---|
                 | variable_name | What it measures in plain English | Category values if applicable |
 
                 TABLE 2 - Variable Availability Across Tables/Sources:
-                | Variable Name | Original Table | Source file |
+                | Raw Variable Name | Original Table | Source file |
                 |---|---|---|
                 | variable_name | Table Name | File name |
                 
                 CRITICAL RULES FOR TABLE 1:
-                - Table 1, Column 1: MUST show the variable NAME/ID (e.g., walk, dress, löpnr, kön)
+                - Table 1, Column 1: MUST show the raw variable NAME/ID (e.g., löpnr, kön)
                 - Table 1, Column 2: MUST show what the variable measures in plain English
                 - Table 1, Column 3: MUST show category values (e.g., "1=man, 2=woman" or "N/A" if no categories)
                 
                 CRITICAL RULES FOR TABLE 2:
-                - Table 2, Column 1: Variable NAME/ID
+                - Table 2, Column 1: Raw Variable NAME/ID
                 - Table 2, Column 2: Original Table name (e.g., SNAC-K_c1)
                 - Table 2, Column 3: Source file name - EXTRACT from "File: xxx.xml" at the TOP of each chunk
                 - For EACH variable, list EVERY source/table/file combination where it appears
@@ -208,6 +201,7 @@ if prompt := st.chat_input("Ask about your metadata..."):
                 | walk | SNAC-K_c2 | SNAC-K_Cohort2_Baseline.xml | 
                 - Do NOT consolidate - show each source separately
                 - NEVER invent file names - only use files mentioned in the context
+                - NEVER invent raw variable names - only use variable names mentioned in the context
                 - If source file cannot be determined, use "Unknown" instead of guessing
                 
                 HOW TO FIND SOURCE FILE:
@@ -219,13 +213,13 @@ if prompt := st.chat_input("Ask about your metadata..."):
                 "In SNAC-K, several variables measure basic demographics. Participants are identified by a unique proband number (löpnr). The cohort includes both men and women, tracked through a sex variable. Birth dates are recorded to calculate age.
 
 
-                | Variable Name | Label | Categories |
+                | Raw Variable Name | Label | Categories |
                 |---|---|---|
                 | löpnr | Unique participant identifier | N/A (unique ID) |
                 | kön | Participant's biological sex | 1=man, 2=woman |
                 | Birthday | Date of birth for age calculation | Date format |
 
-                | Variable Name | Original Table | Source File |
+                | Raw Variable Name | Original Table | Source File |
                 |---|---|---|
                 | löpnr | SNAC-K_c1 | SNAC-K_Cohort1_Baseline.xml | 
                 | löpnr | SNAC-K_c2 | SNAC-K_Cohort2_Baseline.xml | 
