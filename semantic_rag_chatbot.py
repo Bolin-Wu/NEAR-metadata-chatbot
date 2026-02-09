@@ -61,6 +61,46 @@ def load_vectorstore():
     
     return None
 
+def get_database_description_once(vectorstore):
+    """Retrieve and cache database description from vector store."""
+    if vectorstore is None:
+        return ""
+    
+    try:
+        # Query for database description documents
+        retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+        docs = retriever.invoke("cohort study design overview background")
+        
+        for doc in docs:
+            if doc.metadata.get("type") == "database_description":
+                return doc.page_content
+    except Exception as e:
+        st.warning(f"Could not retrieve database description: {e}")
+    
+    return ""
+
+def filter_and_organize_context(query, vectorstore):
+    """Retrieve and organize context - only variable definitions for efficiency."""
+    if vectorstore is None:
+        return ""
+    
+    try:
+        retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
+        docs = retriever.invoke(query)
+        
+        var_defs = []
+        
+        for doc in docs:
+            if doc.metadata.get("type") == "variable_definitions":
+                var_defs.append(doc)
+        
+        # Return only variable definitions (description cached separately)
+        context_text = "\n\n---\n\n".join([doc.page_content for doc in var_defs])
+        return context_text
+    except Exception as e:
+        st.error(f"Error retrieving context: {e}")
+        return ""
+
 # ── Main App ──────────────────────────────────────────────────────────────────
 
 st.title("💬 Semantic RAG Chatbot with Metadata")
@@ -84,6 +124,10 @@ if vectorstore is None:
     st.stop()
 else:
     st.success(f"✓ Vector store loaded with {vectorstore._collection.count()} items. Ready to chat!")
+
+# Cache database description (fetch once)
+if "db_description" not in st.session_state:
+    st.session_state.db_description = get_database_description_once(vectorstore)
 
 # ── Chat ──────────────────────────────────────────────────────────────────────
 if "messages" not in st.session_state:
@@ -110,55 +154,79 @@ if prompt := st.chat_input("Ask about your metadata..."):
                     model_name="llama-3.1-8b-instant",
                     temperature=0.1,
                 )
+                
                 prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata.
 
-                Your task is to answer questions about variables and metadata from cohort studies using ONLY the provided context.
+                COHORT BACKGROUND:
+                {cohort_background}
 
-                CRITICAL INSTRUCTIONS - FOLLOW THESE STRICTLY:
-                1. NEVER copy or paste raw variable definitions, metadata blocks, or XML data into your answer
-                2. ALWAYS extract the key information and rewrite it in your own narrative sentences
-                3. When listing related variables, present them in a clear table format (see below)
-                4. Include variable names and their labels
-                5. Include categories when available
-                6. Group related variables by theme or category
-                7. Cite cohort/wave/table information when relevant
-                8. If context is insufficient, clearly state that and suggest refining the query
+                ---
 
-                START YOUR ANSWER DIRECTLY WITH YOUR NARRATIVE - DO NOT INCLUDE ANY RAW DATA AT THE BEGINNING.
+                Your task is to answer questions about variables and metadata from this cohort.
 
-                TABLE FORMAT FOR VARIABLES:
-                If there are multiple related variables, use this markdown table format:
+                IMPORTANT INSTRUCTIONS:
+                1. READ and UNDERSTAND the raw variable data below
+                2. COMPLETELY REWRITE it in natural, conversational language
+                3. NEVER quote or copy-paste the raw "Variable:", "Label:", "Original Table:", "Categories:" text
+                4. Group related variables by theme and by their original tables/sources
+                5. Explain what each variable measures in plain English
 
-                | Variable Name | Label | Categories |
-                |---|---|---|
-                | SN3B15_5 | Choice of transportation to/from work | Motorcycle/Moped, Car, Bus, Train, Bicycle, Walking |
-                | SN3B15_6 | Frequency of using transportation | Daily, Several times per week, Weekly |
-
-                Example of CORRECT full answer:
-                "In the SNAC-K cohort, several variables relate to mobility and transportation. These variables assess different aspects of how participants move and travel.
-
-                | Variable Name | Label | Categories |
-                |---|---|---|
-                | SN3B15_5 | Choice of transportation to/from work | Motorcycle/Moped, Car, Bus, Train, Bicycle, Walking |
-                | SN3B15_6 | Frequency of using transportation | Daily, Several times per week, Weekly |
-
-                These variables are part of the Lifestyle Behaviours domain and are found in the SNAC-K_wave4_2010_c3 table. They help researchers understand..."
-
-                Context from database:
+                ### VARIABLE DATA:
                 {context}
 
-                Question: {question}
+                ### Question from user:
+                {question}
+
+                ### Your Response Instructions:
+                - Start with a clear, natural explanation of the topic
+                - Use your own words to describe what the variables measure
+                - If multiple related variables exist from DIFFERENT TABLES/SOURCES, create TWO summary tables:
+
+                TABLE 1 - Variables by Content (what they measure):
+                | Variable Name | Label |
+                |---|---|
+                | variable_name | Description in plain English |
+
+                TABLE 2 - Variable Availability Across Tables/Sources:
+                | Variable Name | Original Table | Categories |
+                |---|---|---|
+                | variable_name | Table Name | Main value categories |
+
+                - Never include raw metadata formatting in your answer
+                - Always cite which cohort or data source you're referencing
+
+                EXAMPLE OF CORRECT FORMAT:
+                "In SNAC-K, several variables measure basic demographics. Participants are identified by a unique proband number (löpnr). The cohort includes both men and women, tracked through a sex variable. Birth dates are recorded to calculate age.
+
+                | Variable Name | Label |
+                |---|---|
+                | löpnr | Unique participant identifier |
+                | kön | Participant's biological sex |
+                | Birthday | Date of birth for age calculation |
+
+                | Variable Name | Original Table | Categories |
+                |---|---|---|
+                | löpnr | SNAC-K_c1 | Unique ID |
+                | kön | SNAC-K_c1 | 1=man, 2=woman |
+                | Birthday | SNAC-K_c1 | Date |"
 
                 Answer:"""
 
                 PROMPT = PromptTemplate(
-                    template=prompt_template, input_variables=["context", "question"]
+                    template=prompt_template, 
+                    input_variables=["cohort_background", "context", "question"]
                 )
 
-                retriever = vectorstore.as_retriever(search_kwargs={"k": 10})  
+                # Get context (only variable definitions for efficiency)
+                context = filter_and_organize_context(prompt, vectorstore)
+                cohort_background = st.session_state.get("db_description", "")
 
                 rag_chain = (
-                    {"context": retriever, "question": RunnablePassthrough()}
+                    {
+                        "cohort_background": lambda _: cohort_background,
+                        "context": lambda _: context,
+                        "question": RunnablePassthrough()
+                    }
                     | PROMPT
                     | llm
                     | StrOutputParser()
@@ -173,11 +241,6 @@ if prompt := st.chat_input("Ask about your metadata..."):
                     else:
                         st.error(f"Error: {str(e)}")
                         response = ""
-
-                with st.expander("Sources used"):
-                    for doc in retriever.invoke(prompt):
-                        st.caption(f"File: {doc.metadata.get('source', 'unknown')}")
-                        st.write(doc.page_content[:300] + "...")
 
         st.markdown(response)
 

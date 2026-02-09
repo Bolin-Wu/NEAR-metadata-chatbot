@@ -47,7 +47,7 @@ def process_xmls_to_vectorstore(data_dir: str, database_name: str = None):
     prefix = f"[{database_name}] " if database_name else ""
     print(f"\n{prefix}Processing {data_dir}...")
     
-    # Find and add the JSON description file (handle different naming conventions)
+    # Find and add the JSON description file
     json_files = glob.glob(os.path.join(data_dir, "*.json"))
     for json_file in json_files:
         try:
@@ -55,7 +55,11 @@ def process_xmls_to_vectorstore(data_dir: str, database_name: str = None):
                 json_text = f.read()
             doc = Document(
                 page_content=f"Database Description: {json_text}",
-                metadata={"source": os.path.basename(json_file), "database": database_name or "unknown"}
+                metadata={
+                    "source": os.path.basename(json_file), 
+                    "database": database_name or "unknown",
+                    "type": "database_description"
+                }
             )
             documents.append(doc)
             print(f"  ✓ Loaded {os.path.basename(json_file)}")
@@ -70,11 +74,23 @@ def process_xmls_to_vectorstore(data_dir: str, database_name: str = None):
         file_name = os.path.basename(file_path)
         
         try:
-            text = parse_xml_to_text(file_path)  # Already cleaned by parser
+            text = parse_xml_to_text(file_path)
+            
+            # Extract table name from text if available
+            table_name = "unknown"
+            for line in text.split('\n'):
+                if "Original Table:" in line:
+                    table_name = line.split("Original Table:")[-1].strip()
+                    break
             
             doc = Document(
                 page_content=text,
-                metadata={"source": file_name, "database": database_name or "unknown"}
+                metadata={
+                    "source": file_name, 
+                    "database": database_name or "unknown",
+                    "table": table_name,
+                    "type": "variable_definitions"
+                }
             )
             documents.append(doc)
             print(f"  ✓ Loaded {file_name}")
@@ -88,14 +104,14 @@ def process_xmls_to_vectorstore(data_dir: str, database_name: str = None):
     
     # Split into smaller chunks
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=800,  # Updated from 500
-        chunk_overlap=150,  # Updated from 50
-            separators=[
-                "\n\n",  # Paragraph breaks first
-                "Variable:",  # Then variable definitions
-                "\n",  # Then line breaks
-                " "
-    ]
+        chunk_size=800,
+        chunk_overlap=150,
+        separators=[
+            "\n\n",
+            "Variable:",
+            "\n",
+            " "
+        ]
     )
     chunks = text_splitter.split_documents(documents)
     print(f"  Total chunks: {len(chunks)}")

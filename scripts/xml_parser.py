@@ -18,10 +18,8 @@ def parse_xml_to_text(file_path: str) -> str:
         
         if element.tag == 'variable':
             name = element.get('name', 'unknown')
-            value_type = element.get('valueType', 'unknown')
             
             text += f"{prefix}Variable: {name}\n"
-            text += f"{prefix}  ValueType: {value_type}\n"
             
             # Extract attributes directly (label, original_table, Target, Source, etc.)
             attributes_elem = element.find('attributes')
@@ -52,10 +50,8 @@ def parse_xml_to_text(file_path: str) -> str:
         
         elif element.tag == 'entity':
             name = element.get('name', 'unknown')
-            value_type = element.get('valueType', 'unknown')
             
             text += f"{prefix}Entity: {name}\n"
-            text += f"{prefix}  ValueType: {value_type}\n"
             
             # Extract attributes directly
             attributes_elem = element.find('attributes')
