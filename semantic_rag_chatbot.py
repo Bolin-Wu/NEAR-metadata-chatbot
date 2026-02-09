@@ -170,6 +170,7 @@ if prompt := st.chat_input("Ask about your metadata..."):
                 3. NEVER quote or copy-paste the raw "Variable:", "Label:", "Original Table:", "Categories:" text
                 4. Group related variables by theme and by their original tables/sources
                 5. Explain what each variable measures in plain English
+                6. Extract source file names from the "File: xxx.xml" line at the TOP of each chunk
 
                 ### VARIABLE DATA:
                 {context}
@@ -200,14 +201,20 @@ if prompt := st.chat_input("Ask about your metadata..."):
                 CRITICAL RULES FOR TABLE 2:
                 - Table 2, Column 1: Variable NAME/ID
                 - Table 2, Column 2: Original Table name (e.g., SNAC-K_c1)
-                - Table 2, Column 3: Source file name (e.g., SNAC-K_Cohort1_Baseline.xml)
+                - Table 2, Column 3: Source file name - EXTRACT from "File: xxx.xml" at the TOP of each chunk
                 - For EACH variable, list EVERY source/table/file combination where it appears
                 - If "walk" appears in SNAC-K_c1 AND SNAC-K_c2, show BOTH rows:
                 | walk | SNAC-K_c1 | SNAC-K_Cohort1_Baseline.xml | 
                 | walk | SNAC-K_c2 | SNAC-K_Cohort2_Baseline.xml | 
                 - Do NOT consolidate - show each source separately
-                - This helps researchers find which data files contain each variable
-
+                - NEVER invent file names - only use files mentioned in the context
+                - If source file cannot be determined, use "Unknown" instead of guessing
+                
+                HOW TO FIND SOURCE FILE:
+                - Look for "File: xxx.xml" at the BEGINNING of each chunk
+                - This is the ONLY reliable source of file information
+                - Extract the filename exactly as shown (e.g., SNAC-K_Cohort1_Baseline.xml)
+                
                 EXAMPLE OF CORRECT FORMAT:
                 "In SNAC-K, several variables measure basic demographics. Participants are identified by a unique proband number (löpnr). The cohort includes both men and women, tracked through a sex variable. Birth dates are recorded to calculate age.
 
