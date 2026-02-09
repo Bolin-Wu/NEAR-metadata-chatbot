@@ -68,7 +68,7 @@ def get_database_description_once(vectorstore):
     
     try:
         # Query for database description documents
-        retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+        retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
         docs = retriever.invoke("cohort study design overview background")
         
         for doc in docs:
@@ -85,7 +85,7 @@ def filter_and_organize_context(query, vectorstore):
         return ""
     
     try:
-        retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
+        retriever = vectorstore.as_retriever(search_kwargs={"k": 20})
         docs = retriever.invoke(query)
         
         var_defs = []
@@ -192,13 +192,21 @@ if prompt := st.chat_input("Ask about your metadata..."):
                 |---|---|---|
                 | variable_name | Table Name | File name |
                 
-                CRITICAL RULES:
+                CRITICAL RULES FOR TABLE 1:
                 - Table 1, Column 1: MUST show the variable NAME/ID (e.g., walk, dress, löpnr, kön)
                 - Table 1, Column 2: MUST show what the variable measures in plain English
                 - Table 1, Column 3: MUST show category values (e.g., "1=man, 2=woman" or "N/A" if no categories)
+                
+                CRITICAL RULES FOR TABLE 2:
                 - Table 2, Column 1: Variable NAME/ID
                 - Table 2, Column 2: Original Table name (e.g., SNAC-K_c1)
                 - Table 2, Column 3: Source file name (e.g., SNAC-K_Cohort1_Baseline.xml)
+                - For EACH variable, list EVERY source/table/file combination where it appears
+                - If "walk" appears in SNAC-K_c1 AND SNAC-K_c2, show BOTH rows:
+                | walk | SNAC-K_c1 | SNAC-K_Cohort1_Baseline.xml | 
+                | walk | SNAC-K_c2 | SNAC-K_Cohort2_Baseline.xml | 
+                - Do NOT consolidate - show each source separately
+                - This helps researchers find which data files contain each variable
 
                 EXAMPLE OF CORRECT FORMAT:
                 "In SNAC-K, several variables measure basic demographics. Participants are identified by a unique proband number (löpnr). The cohort includes both men and women, tracked through a sex variable. Birth dates are recorded to calculate age.
@@ -213,8 +221,9 @@ if prompt := st.chat_input("Ask about your metadata..."):
                 | Variable Name | Original Table | Source File |
                 |---|---|---|
                 | löpnr | SNAC-K_c1 | SNAC-K_Cohort1_Baseline.xml | 
+                | löpnr | SNAC-K_c2 | SNAC-K_Cohort2_Baseline.xml | 
                 | kön | SNAC-K_c1 | SNAC-K_Cohort1_Baseline.xml | 
-                | Birthday | SNAC-K_c1 | SNAC-K_Cohort1_Baseline.xml | 
+                | kön | SNAC-K_c2 | SNAC-K_Cohort2_Baseline.xml | 
 
                 Answer:"""
 
