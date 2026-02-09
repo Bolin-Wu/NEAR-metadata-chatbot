@@ -11,12 +11,13 @@ from xml_parser import parse_xml_to_text
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-CHROMA_DIR = "./chroma_xml_db"
+CHROMA_DEMO_DB = "./chroma_demo_db"      # Small demo database (push to GitHub)
+CHROMA_PROD_DB = "./chroma_prod_db"      # Large production database (use cloud storage)
 DATA_ROOT = "./data"
 TRAIN_MODE = "specific"  # "specific" or "all"
 SELECTED_DATABASE = "SNAC-K"  # Only used if TRAIN_MODE == "specific"
 
-# ── Functions ─────────────────────────────────────────────────────────────────
+# Functions ─────────────────────────────────────────────────────────────────
 def get_embeddings():
     """Initialize embeddings model."""
     return HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
@@ -54,7 +55,7 @@ def process_xmls_to_vectorstore(data_dir: str, database_name: str = None):
                 json_text = f.read()
             doc = Document(
                 page_content=f"Database Description: {json_text}",
-                metadata={ "source": os.path.basename(json_file), "database": database_name or "unknown"}
+                metadata={"source": os.path.basename(json_file), "database": database_name or "unknown"}
             )
             documents.append(doc)
             print(f"  ✓ Loaded {os.path.basename(json_file)}")
@@ -102,11 +103,26 @@ if __name__ == "__main__":
     print("NEAR Metadata Vector Store Training Script")
     print("=" * 60)
     
-    # Get available databases
     databases = get_available_databases()
     
     if not databases:
         print(f"\n✗ No databases found in {DATA_ROOT}")
+        exit(1)
+    
+    # Choose environment (demo or production)
+    print("\nChoose deployment environment:")
+    print("1. Demo (to push to GitHub) - will overwrite chroma_demo_db")
+    print("2. Production (cloud storage) - will create/overwrite chroma_prod_db")
+    env_choice = input("Enter choice (1 or 2): ").strip()
+    
+    if env_choice == "1":
+        target_db = CHROMA_DEMO_DB
+        env_name = "DEMO"
+    elif env_choice == "2":
+        target_db = CHROMA_PROD_DB
+        env_name = "PRODUCTION"
+    else:
+        print("Invalid choice.")
         exit(1)
     
     # Determine which databases to train on
@@ -126,18 +142,18 @@ if __name__ == "__main__":
         print(f"\n✗ Invalid TRAIN_MODE: {TRAIN_MODE}. Use 'specific' or 'all'")
         exit(1)
     
-    confirm = input("\nProceed with training? (y/n): ").strip().lower()
+    confirm = input(f"\nProceed with {env_name} training? (y/n): ").strip().lower()
     
     if confirm != 'y':
         print("Training cancelled.")
         exit(0)
     
     # Clear existing vector store if it exists
-    if os.path.exists(CHROMA_DIR):
-        confirm_clear = input(f"\n{CHROMA_DIR} already exists. Delete it? (y/n): ").strip().lower()
+    if os.path.exists(target_db):
+        confirm_clear = input(f"\n{target_db} already exists. Delete it? (y/n): ").strip().lower()
         if confirm_clear == 'y':
-            shutil.rmtree(CHROMA_DIR)
-            print(f"Deleted {CHROMA_DIR}")
+            shutil.rmtree(target_db)
+            print(f"Deleted {target_db}")
         else:
             print("Cancelled. Existing vector store will be overwritten.")
     
@@ -152,19 +168,24 @@ if __name__ == "__main__":
         
         print(f"\nTotal chunks to embed: {len(all_chunks)}")
         
-        # Create embeddings and store
-        print("Creating embeddings and storing in Chroma...")
+        print(f"Creating embeddings and storing in {env_name} database...")
         embeddings = get_embeddings()
         vectorstore = Chroma.from_documents(
             documents=all_chunks,
             embedding=embeddings,
-            persist_directory=CHROMA_DIR,
+            persist_directory=target_db,
             collection_name="xml_metadata"
         )
         
-        print(f"\n✓ Training complete!")
+        print(f"\n✓ {env_name} training complete!")
         print(f"Vector store created with {vectorstore._collection.count()} items")
-        print(f"Vector store saved to: {os.path.abspath(CHROMA_DIR)}")
+        print(f"Vector store saved to: {os.path.abspath(target_db)}")
+        
+        if env_choice == "1":
+            print("\n💡 Next step: Push chroma_demo_db to GitHub")
+        else:
+            print("\n💡 Next step: Upload chroma_prod_db to cloud storage (S3, GCS, etc.)")
+            
     except Exception as e:
         print(f"\n✗ Error during training: {e}")
         exit(1)
