@@ -103,7 +103,7 @@ def filter_and_organize_context(query, vectorstore):
 
 # ── Main App ──────────────────────────────────────────────────────────────────
 
-st.title("💬 Semantic RAG Chatbot with Metadata")
+st.title("💬 Chatbot with NEAR Metadata")
 st.markdown(f"Ask natural questions about NEAR metadata! (Environment: **{DEPLOYMENT_ENV.upper()}**)")
 
 # Display which database is being used
