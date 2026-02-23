@@ -61,15 +61,15 @@ def load_vectorstore():
     
     return None
 
-def get_database_description_once(vectorstore):
-    """Retrieve and cache database description from vector store."""
+def get_database_description(query, vectorstore):
+    """Retrieve database description from vector store based on user query."""
     if vectorstore is None:
         return ""
     
     try:
-        # Query for database description documents
+        # Query for database description documents relevant to user's question
         retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
-        docs = retriever.invoke("cohort study design overview background")
+        docs = retriever.invoke(query)
         
         for doc in docs:
             if doc.metadata.get("type") == "database_description":
@@ -78,6 +78,19 @@ def get_database_description_once(vectorstore):
         st.warning(f"Could not retrieve database description: {e}")
     
     return ""
+
+def is_variable_question(question):
+    """Determine if the question is about specific variables or general cohort info."""
+    variable_keywords = [
+        "variable", "field", "column", "measure", "data", "table", 
+        "available in", "which variables", "what variables", "what data",
+        "categories", "values", "definition", "what is", "how to find",
+        "named", "called", "list of", "all variables", "different variables",
+        "raw variable name", "labels", "source"
+    ]
+    
+    question_lower = question.lower()
+    return any(keyword in question_lower for keyword in variable_keywords)
 
 def filter_and_organize_context(query, vectorstore):
     """Retrieve and organize context - only variable definitions for efficiency."""
@@ -125,10 +138,6 @@ if vectorstore is None:
 else:
     st.success(f"✓ Vector store loaded with {vectorstore._collection.count()} items. Ready to chat!")
 
-# Cache database description (fetch once)
-if "db_description" not in st.session_state:
-    st.session_state.db_description = get_database_description_once(vectorstore)
-
 # ── Chat ──────────────────────────────────────────────────────────────────────
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -155,98 +164,136 @@ if prompt := st.chat_input("Ask about your metadata..."):
                     temperature=0.1,
                 )
                 
-                prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata.
-
-                COHORT BACKGROUND:
-                {cohort_background}
-
-                ---
-
-                Your task is to answer questions about variables and metadata from this cohort.
-
-                ### VARIABLE DATA:
-                {context}
-
-                ### Question from user:
-                {question}
-
-                ### Your Response Instructions:
-                - Group related variables by theme and by their original tables/sources
-                - Start with a clear, natural explanation of the topic based on the related cohort background
-                - Use your own words to describe what the variables measure
-                - Then, present the variable information in TWO separate markdown tables as specified below:
-
-                TABLE 1 - Variables by Content (what they measure):
-                | Raw Variable Name | Label | Categories |
-                |---|---|---|
-                | variable_name | What it measures in plain English | Category values if applicable |
-
-                TABLE 2 - Variable Availability Across Tables/Sources:
-                | Raw Variable Name | Original Table | Source file |
-                |---|---|---|
-                | variable_name | Table Name | File name |
+                # Determine question type
+                is_var_question = is_variable_question(prompt)
+                # Retrieve relevant cohort background based on user's prompt
+                cohort_background = get_database_description(prompt, vectorstore)
                 
-                CRITICAL RULES FOR TABLE 1:
-                - Table 1, Column 1: MUST show the raw variable NAME/ID (e.g., löpnr, kön)
-                - Table 1, Column 2: MUST show what the variable measures in plain English
-                - Table 1, Column 3: MUST show category values (e.g., "1=man, 2=woman" or "N/A" if no categories)
-                
-                CRITICAL RULES FOR TABLE 2:
-                - Table 2, Column 1: Raw Variable NAME/ID
-                - Table 2, Column 2: Original Table name (e.g., SNAC-K_c1)
-                - Table 2, Column 3: Source file name - EXTRACT from "File: xxx.xml" at the TOP of each chunk
-                - For EACH variable, list EVERY source/table/file combination where it appears
-                - If "walk" appears in SNAC-K_c1 AND SNAC-K_c2, show BOTH rows:
-                | walk | SNAC-K_c1 | SNAC-K_Cohort1_Baseline.xml | 
-                | walk | SNAC-K_c2 | SNAC-K_Cohort2_Baseline.xml | 
-                - Do NOT consolidate - show each source separately
-                - NEVER invent file names - only use files mentioned in the context
-                - NEVER invent raw variable names - only use variable names mentioned in the context
-                - If source file cannot be determined, use "Unknown" instead of guessing
-                
-                HOW TO FIND SOURCE FILE:
-                - Look for "File: xxx.xml" at the BEGINNING of each chunk
-                - This is the ONLY reliable source of file information
-                - Extract the filename exactly as shown (e.g., SNAC-K_Cohort1_Baseline.xml)
-                
-                EXAMPLE OF CORRECT FORMAT:
-                "In SNAC-K, several variables measure basic demographics. Participants are identified by a unique proband number (löpnr). The cohort includes both men and women, tracked through a sex variable. Birth dates are recorded to calculate age.
+                if is_var_question:
+                    # Variable-specific prompt with tables
+                    prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata.
+
+                    COHORT BACKGROUND:
+                    {cohort_background}
+
+                    ---
+
+                    Your task is to answer questions about variables and metadata from this cohort.
+
+                    ### VARIABLE DATA:
+                    {context}
+
+                    ### Question from user:
+                    {question}
+
+                    ### Your Response Instructions:
+                    - Group related variables by theme and by their original tables/sources
+                    - Start with a clear, natural explanation of the topic based on the related cohort background
+                    - Use your own words to describe what the variables measure
+                    - Then, present the variable information in TWO separate markdown tables as specified below:
+
+                    TABLE 1 - Variables by Content (what they measure):
+                    | Raw Variable Name | Label | Categories |
+                    |---|---|---|
+                    | variable_name | What it measures in plain English | Category values if applicable |
+
+                    TABLE 2 - Variable Availability Across Tables/Sources:
+                    | Raw Variable Name | Original Table | Source file |
+                    |---|---|---|
+                    | variable_name | Table Name | File name |
+                    
+                    CRITICAL RULES FOR TABLE 1:
+                    - Table 1, Column 1: MUST show the raw variable NAME/ID (e.g., löpnr, kön)
+                    - Table 1, Column 2: MUST show what the variable measures in plain English
+                    - Table 1, Column 3: MUST show category values (e.g., "1=man, 2=woman" or "N/A" if no categories)
+                    
+                    CRITICAL RULES FOR TABLE 2:
+                    - Table 2, Column 1: Raw Variable NAME/ID
+                    - Table 2, Column 2: Original Table name (e.g., SNAC-K_c1)
+                    - Table 2, Column 3: Source file name - EXTRACT from "File: xxx.xml" at the TOP of each chunk
+                    - For EACH variable, list EVERY source/table/file combination where it appears
+                    - If "walk" appears in SNAC-K_c1 AND SNAC-K_c2, show BOTH rows:
+                    | walk | SNAC-K_c1 | SNAC-K_Cohort1_Baseline.xml | 
+                    | walk | SNAC-K_c2 | SNAC-K_Cohort2_Baseline.xml | 
+                    - Do NOT consolidate - show each source separately
+                    - NEVER invent file names - only use files mentioned in the context
+                    - NEVER invent raw variable names - only use variable names mentioned in the context
+                    - If source file cannot be determined, use "Unknown" instead of guessing
+                    
+                    HOW TO FIND SOURCE FILE:
+                    - Look for "File: xxx.xml" at the BEGINNING of each chunk
+                    - This is the ONLY reliable source of file information
+                    - Extract the filename exactly as shown (e.g., SNAC-K_Cohort1_Baseline.xml)
+                    
+                    EXAMPLE OF CORRECT FORMAT:
+                    "In SNAC-K, several variables measure basic demographics. Participants are identified by a unique proband number (löpnr). The cohort includes both men and women, tracked through a sex variable. Birth dates are recorded to calculate age.
 
 
-                | Raw Variable Name | Label | Categories |
-                |---|---|---|
-                | löpnr | Unique participant identifier | N/A (unique ID) |
-                | kön | Participant's biological sex | 1=man, 2=woman |
-                | Birthday | Date of birth for age calculation | Date format |
+                    | Raw Variable Name | Label | Categories |
+                    |---|---|---|
+                    | löpnr | Unique participant identifier | N/A (unique ID) |
+                    | kön | Participant's biological sex | 1=man, 2=woman |
+                    | Birthday | Date of birth for age calculation | Date format |
 
-                | Raw Variable Name | Original Table | Source File |
-                |---|---|---|
-                | löpnr | SNAC-K_c1 | SNAC-K_Cohort1_Baseline.xml | 
-                | löpnr | SNAC-K_c2 | SNAC-K_Cohort2_Baseline.xml | 
-                | kön | SNAC-K_c1 | SNAC-K_Cohort1_Baseline.xml | 
-                | kön | SNAC-K_c2 | SNAC-K_Cohort2_Baseline.xml | 
+                    | Raw Variable Name | Original Table | Source File |
+                    |---|---|---|
+                    | löpnr | SNAC-K_c1 | SNAC-K_Cohort1_Baseline.xml | 
+                    | löpnr | SNAC-K_c2 | SNAC-K_Cohort2_Baseline.xml | 
+                    | kön | SNAC-K_c1 | SNAC-K_Cohort1_Baseline.xml | 
+                    | kön | SNAC-K_c2 | SNAC-K_Cohort2_Baseline.xml | 
 
-                Answer:"""
+                    Answer:"""
 
-                PROMPT = PromptTemplate(
-                    template=prompt_template, 
-                    input_variables=["cohort_background", "context", "question"]
-                )
+                    PROMPT = PromptTemplate(
+                        template=prompt_template, 
+                        input_variables=["cohort_background", "context", "question"]
+                    )
 
-                # Get context (only variable definitions for efficiency)
-                context = filter_and_organize_context(prompt, vectorstore)
-                cohort_background = st.session_state.get("db_description", "")
+                    # Get context (only variable definitions for efficiency)
+                    context = filter_and_organize_context(prompt, vectorstore)
 
-                rag_chain = (
-                    {
-                        "cohort_background": lambda _: cohort_background,
-                        "context": lambda _: context,
-                        "question": RunnablePassthrough()
-                    }
-                    | PROMPT
-                    | llm
-                    | StrOutputParser()
-                )
+                    rag_chain = (
+                        {
+                            "cohort_background": lambda _: cohort_background,
+                            "context": lambda _: context,
+                            "question": RunnablePassthrough()
+                        }
+                        | PROMPT
+                        | llm
+                        | StrOutputParser()
+                    )
+                else:
+                    # General cohort question - no variables table
+                    prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata.
+
+                    ### COHORT BACKGROUND:
+                    {cohort_background}
+
+                    ### Question from user:
+                    {question}
+
+                    ### Your Response Instructions:
+                    - Answer the user's question about the cohort using the background information provided
+                    - Be clear and concise, using plain language
+                    - Reference specific cohort names and details when relevant
+                    - Do NOT include variable tables - only provide narrative explanations
+
+                    Answer:"""
+
+                    PROMPT = PromptTemplate(
+                        template=prompt_template, 
+                        input_variables=["cohort_background", "question"]
+                    )
+
+                    rag_chain = (
+                        {
+                            "cohort_background": lambda _: cohort_background,
+                            "question": RunnablePassthrough()
+                        }
+                        | PROMPT
+                        | llm
+                        | StrOutputParser()
+                    )
 
                 try:
                     response = rag_chain.invoke(prompt)
