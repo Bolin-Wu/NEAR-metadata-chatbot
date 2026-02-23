@@ -187,60 +187,35 @@ if prompt := st.chat_input("Ask about your metadata..."):
                     {question}
 
                     ### Your Response Instructions:
-                    - Group related variables by theme and by their original tables/sources
+                    - Group related variables by theme
                     - Start with a clear, natural explanation of the topic based on the related cohort background
                     - Use your own words to describe what the variables measure
-                    - Then, present the variable information in TWO separate markdown tables as specified below:
+                    - Then, present the variable information in a markdown table as specified below:
 
-                    TABLE 1 - Variables by Content (what they measure):
+                    TABLE - Variables by Content (what they measure):
                     | Raw Variable Name | Label | Categories |
                     |---|---|---|
                     | variable_name | What it measures in plain English | Category values if applicable |
-
-                    TABLE 2 - Variable Availability Across Tables/Sources:
-                    | Raw Variable Name | Original Table | Source file |
-                    |---|---|---|
-                    | variable_name | Table Name | File name |
                     
-                    CRITICAL RULES FOR TABLE 1:
-                    - Table 1, Column 1: MUST show the raw variable NAME/ID (e.g., löpnr, kön)
-                    - Table 1, Column 2: MUST show what the variable measures in plain English
-                    - Table 1, Column 3: MUST show category values (e.g., "1=man, 2=woman" or "N/A" if no categories)
+                    CRITICAL RULES:
+                    - Column 1: MUST show the raw variable NAME/ID (e.g., löpnr, kön)
+                    - Column 2: MUST show what the variable measures in plain English
+                    - Column 3: MUST show category values (e.g., "1=man, 2=woman" or "N/A" if no categories)
+                    - NEVER invent variable names - only use variable names mentioned in the context
                     
-                    CRITICAL RULES FOR TABLE 2:
-                    - Table 2, Column 1: Raw Variable NAME/ID
-                    - Table 2, Column 2: Original Table name (e.g., SNAC-K_c1)
-                    - Table 2, Column 3: Source file name - EXTRACT from "File: xxx.xml" at the TOP of each chunk
-                    - For EACH variable, list EVERY source/table/file combination where it appears
-                    - If "walk" appears in SNAC-K_c1 AND SNAC-K_c2, show BOTH rows:
-                    | walk | SNAC-K_c1 | SNAC-K_Cohort1_Baseline.xml | 
-                    | walk | SNAC-K_c2 | SNAC-K_Cohort2_Baseline.xml | 
-                    - Do NOT consolidate - show each source separately
-                    - NEVER invent file names - only use files mentioned in the context
-                    - NEVER invent raw variable names - only use variable names mentioned in the context
-                    - If source file cannot be determined, use "Unknown" instead of guessing
-                    
-                    HOW TO FIND SOURCE FILE:
-                    - Look for "File: xxx.xml" at the BEGINNING of each chunk
-                    - This is the ONLY reliable source of file information
-                    - Extract the filename exactly as shown (e.g., SNAC-K_Cohort1_Baseline.xml)
+                    IMPORTANT NOTE ON VARIABLE AVAILABILITY:
+                    For information about which cohorts and tables contain these variables, please refer to the Maelstrom catalogue at: https://www.maelstrom-research.org/
                     
                     EXAMPLE OF CORRECT FORMAT:
                     "In SNAC-K, several variables measure basic demographics. Participants are identified by a unique proband number (löpnr). The cohort includes both men and women, tracked through a sex variable. Birth dates are recorded to calculate age.
-
 
                     | Raw Variable Name | Label | Categories |
                     |---|---|---|
                     | löpnr | Unique participant identifier | N/A (unique ID) |
                     | kön | Participant's biological sex | 1=man, 2=woman |
                     | Birthday | Date of birth for age calculation | Date format |
-
-                    | Raw Variable Name | Original Table | Source File |
-                    |---|---|---|
-                    | löpnr | SNAC-K_c1 | SNAC-K_Cohort1_Baseline.xml | 
-                    | löpnr | SNAC-K_c2 | SNAC-K_Cohort2_Baseline.xml | 
-                    | kön | SNAC-K_c1 | SNAC-K_Cohort1_Baseline.xml | 
-                    | kön | SNAC-K_c2 | SNAC-K_Cohort2_Baseline.xml | 
+                    
+                    For detailed information on where these variables are available across different cohort studies, please check the Maelstrom catalogue."
 
                     Answer:"""
 
