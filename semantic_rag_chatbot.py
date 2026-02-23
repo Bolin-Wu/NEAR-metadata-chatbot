@@ -84,7 +84,7 @@ def is_variable_question(question):
     variable_keywords = [
         "variable", "field", "column", "measure", "data", "table", 
         "available in", "which variables", "what variables", "what data",
-        "categories", "values", "definition", "what is", "how to find",
+        "categories", "values", "definition", "how to find",
         "named", "called", "list of", "all variables", "different variables",
         "raw variable name", "labels", "source"
     ]
