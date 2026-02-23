@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-st.set_page_config(page_title="Semantic RAG XML Metadata Chatbot", layout="wide")
+st.set_page_config(page_title="NEAR Metadata Chatbot", layout="wide")
 
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 CHROMA_DEMO_DB = "./chroma_demo_db"      # Small demo (in GitHub)
@@ -103,7 +103,7 @@ def filter_and_organize_context(query, vectorstore):
 
 # ── Main App ──────────────────────────────────────────────────────────────────
 
-st.title("💬 Chatbot with NEAR Metadata")
+st.title("💬 NEAR Metadata Chatbot")
 st.markdown(f"Ask natural questions about NEAR metadata! (Environment: **{DEPLOYMENT_ENV.upper()}**)")
 
 # Display which database is being used
