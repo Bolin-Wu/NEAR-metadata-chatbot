@@ -1,8 +1,10 @@
 import os
 import xml.etree.ElementTree as ET
-# import json
+from langchain_core.documents import Document
+
 
 def parse_xml_to_text(file_path: str) -> str:
+    """Parse XML file and extract text content."""
     with open(file_path, 'r', encoding='utf-8') as f:
         tree = ET.parse(f)
     root = tree.getroot()
@@ -87,3 +89,31 @@ def parse_xml_to_text(file_path: str) -> str:
     
     cleaned_text = '\n'.join(cleaned_lines).strip()
     return cleaned_text
+
+
+def extract_table_name(text: str) -> str:
+    """Extract table name from parsed XML text."""
+    table_name = "unknown"
+    for line in text.split('\n'):
+        if "Original Table:" in line:
+            table_name = line.split("Original Table:")[-1].strip()
+            break
+    return table_name
+
+
+def parse_xml_to_document(file_path: str, database_name: str = None) -> Document:
+    """Parse XML file and create a LangChain Document with metadata."""
+    text = parse_xml_to_text(file_path)
+    table_name = extract_table_name(text)
+    
+    doc = Document(
+        page_content=text,
+        metadata={
+            "source": os.path.basename(file_path),
+            "database": database_name or "unknown",
+            "table": table_name,
+            "type": "variable_definitions"
+        }
+    )
+    
+    return doc

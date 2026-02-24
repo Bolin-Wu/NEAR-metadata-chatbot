@@ -7,7 +7,7 @@ from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from xml_parser import parse_xml_to_text
+from xml_parser import parse_xml_to_document
 from json_parser import parse_json_to_document
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -40,8 +40,8 @@ def get_available_databases():
     
     return sorted(databases)
 
-def process_xmls_to_vectorstore(data_dir: str, database_name: str = None):
-    """Process XML files from the specified directory and create vector store."""
+def process_database_to_vectorstore(data_dir: str, database_name: str = None):
+    """Process XML and JSON files from the specified database directory and create vector store."""
     xml_files = glob.glob(os.path.join(data_dir, "*.xml"))
     documents = []
     
@@ -66,24 +66,7 @@ def process_xmls_to_vectorstore(data_dir: str, database_name: str = None):
         file_name = os.path.basename(file_path)
         
         try:
-            text = parse_xml_to_text(file_path)
-            
-            # Extract table name from text if available
-            table_name = "unknown"
-            for line in text.split('\n'):
-                if "Original Table:" in line:
-                    table_name = line.split("Original Table:")[-1].strip()
-                    break
-            
-            doc = Document(
-                page_content=text,
-                metadata={
-                    "source": file_name, 
-                    "database": database_name or "unknown",
-                    "table": table_name,
-                    "type": "variable_definitions"
-                }
-            )
+            doc = parse_xml_to_document(file_path, database_name=database_name)
             documents.append(doc)
             print(f"  ✓ Loaded {file_name}")
         except Exception as e:
@@ -176,7 +159,7 @@ if __name__ == "__main__":
         
         for db in selected_databases:
             data_dir = os.path.join(DATA_ROOT, db)
-            chunks = process_xmls_to_vectorstore(data_dir, database_name=db)
+            chunks = process_database_to_vectorstore(data_dir, database_name=db)
             all_chunks.extend(chunks)
         
         print(f"\nTotal chunks to embed: {len(all_chunks)}")

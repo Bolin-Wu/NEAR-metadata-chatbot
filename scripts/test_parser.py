@@ -1,5 +1,5 @@
 import os
-from xml_parser import parse_xml_to_text
+from xml_parser import parse_xml_to_document
 from json_parser import parse_json_to_document
 
 # Test XML Parser
@@ -10,9 +10,14 @@ print("=" * 60)
 xml_file_path = "./data/SNAC-K/SNAC-K_Cohort1_Baseline.xml"
 
 if os.path.exists(xml_file_path):
-    parsed_text = parse_xml_to_text(xml_file_path)
-    print("Parsed Output (first 1500 chars):")
-    print(parsed_text[:1500])
+    doc = parse_xml_to_document(xml_file_path, database_name="SNAC-K")
+    print("Document Metadata:")
+    print(f"  Source: {doc.metadata['source']}")
+    print(f"  Database: {doc.metadata['database']}")
+    print(f"  Table: {doc.metadata['table']}")
+    print(f"  Type: {doc.metadata['type']}")
+    print("\nDocument Content (first 1500 chars):")
+    print(doc.page_content[:1500])
 else:
     print(f"File not found: {xml_file_path}")
 

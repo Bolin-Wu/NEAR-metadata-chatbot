@@ -1,3 +1,17 @@
+"""
+File Structure Reorganization Script (Run Once Only)
+
+This script reorganizes XML files exported from Maelstrom into a cleaner structure.
+It processes all databases and removes unnecessary files (entities.xml) while 
+renaming variables.xml to match the database name for better organization.
+
+⚠️  IMPORTANT: This script should only be run ONCE after initial data export from Maelstrom.
+    Running it multiple times may cause data loss or unexpected behavior.
+
+After running, verify the data/[database]/ structure is organized as expected before
+proceeding with vectorstore training.
+"""
+
 import os
 import shutil
 
