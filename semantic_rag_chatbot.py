@@ -302,7 +302,6 @@ if prompt := st.chat_input("Ask about your metadata..."):
                     - Answer the user's question about the cohort using the background information provided
                     - Be clear and concise, using plain language
                     - Reference specific cohort names and details when relevant
-                    - Do NOT include variable tables - only provide narrative explanations
 
                     Answer:"""
 
