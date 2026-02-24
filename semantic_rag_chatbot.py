@@ -117,10 +117,10 @@ def get_database_description(query, vectorstore):
 def is_variable_question(question):
     """Determine if the question is about specific variables or general cohort info."""
     variable_keywords = [
-        "variable", "field", "column", "measure", "data", "table", 
+        "variable", "variables","field", "column", "measure", "data", "table", 
         "available in", "which variables", "what variables", "what data",
         "categories", "values", "definition", "how to find",
-        "named", "called", "list of", "all variables", "different variables",
+        "named", "called", "list of", "question", "questions",
         "raw variable name", "labels", "source"
     ]
     
