@@ -14,7 +14,19 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-st.set_page_config(page_title="NEAR Metadata Chatbot", layout="wide")
+st.set_page_config(
+    page_title="NEAR Metadata Chatbot",
+    layout="wide",
+    initial_sidebar_state="expanded",
+    menu_items=None
+)
+
+# Add logo to sidebar
+with st.sidebar:
+    logo_path = Path("logo/NEAR-chatbot.jpg")
+    if logo_path.exists():
+        st.image(str(logo_path), width=150)
+    st.markdown("---")
 
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 CHROMA_DEMO_DB = "./chroma_demo_db"      # Small demo (in GitHub)
