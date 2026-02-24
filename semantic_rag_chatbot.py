@@ -11,8 +11,9 @@ from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
 from dotenv import load_dotenv
 
-# Import shared utility
-from scripts.database_utils import get_available_databases
+# Add scripts directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent / "scripts"))
+from database_utils import get_available_databases
 
 load_dotenv()
 
