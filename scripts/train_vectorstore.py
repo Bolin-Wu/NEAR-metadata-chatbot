@@ -9,6 +9,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from xml_parser import parse_xml_to_document
 from json_parser import parse_json_to_document
+from database_utils import get_available_databases
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
@@ -22,23 +23,6 @@ SELECTED_DATABASE = "SNAC-K"  # Only used if TRAIN_MODE == "specific"
 def get_embeddings():
     """Initialize embeddings model."""
     return HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
-
-def get_available_databases():
-    """Get list of available databases in the data folder."""
-    if not os.path.exists(DATA_ROOT):
-        return []
-    
-    databases = []
-    for item in os.listdir(DATA_ROOT):
-        item_path = os.path.join(DATA_ROOT, item)
-        if os.path.isdir(item_path):
-            # Check if directory contains XML or JSON files
-            has_xml = len(glob.glob(os.path.join(item_path, "*.xml"))) > 0
-            has_json = len(glob.glob(os.path.join(item_path, "*.json"))) > 0
-            if has_xml or has_json:
-                databases.append(item)
-    
-    return sorted(databases)
 
 def process_database_to_vectorstore(data_dir: str, database_name: str = None):
     """Process XML and JSON files from the specified database directory and create vector store."""
