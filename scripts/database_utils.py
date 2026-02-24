@@ -5,8 +5,12 @@ import glob
 from pathlib import Path
 
 
-def get_available_databases(data_root: str = "./data"):
+def get_available_databases(data_root: str = None):
     """Get list of available databases in the data folder."""
+    if data_root is None:
+        # Use absolute path based on this file's location
+        data_root = str(Path(__file__).parent.parent / "data")
+    
     if not os.path.exists(data_root):
         return []
     
