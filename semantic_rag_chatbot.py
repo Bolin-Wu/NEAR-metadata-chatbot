@@ -11,10 +11,6 @@ from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
 from dotenv import load_dotenv
 
-# Add scripts directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent / "scripts"))
-from database_utils import get_available_databases
-
 load_dotenv()
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -29,18 +25,27 @@ st.set_page_config(
 with st.sidebar:
     logo_path = Path("logo/NEAR-chatbot.jpg")
     if logo_path.exists():
-        st.image(str(logo_path), width=150)
+        st.image(str(logo_path), width=200)
     st.markdown("---")
     
     # Display available databases for future filtering
     st.subheader("💡 Available Databases")
-    available_dbs = get_available_databases()
-    if available_dbs:
-        st.caption("(Filtering by database coming soon)")
-        for db in available_dbs:
-            st.caption(f"✓ {db}")
-    else:
-        st.warning("No databases found in ./data")
+    available_dbs = [
+        "Betula",
+        "GAS_SNAC_S",
+        "GENDER",
+        "H70",
+        "KP",
+        "OCTO-Twin",
+        "SATSA",
+        "SNAC-B",
+        "SNAC-K",
+        "SNAC-N",
+        "SWEOLD"
+    ]
+    st.caption("(Filtering by database coming soon)")
+    for db in available_dbs:
+        st.caption(f"- {db}")
     
     st.markdown("---")
 
