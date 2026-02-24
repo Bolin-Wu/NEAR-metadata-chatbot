@@ -32,7 +32,7 @@ with st.sidebar:
     st.markdown("---")
     
     # Display available databases for future filtering
-    st.subheader("📚 Available Databases")
+    st.subheader("💡 Available Databases")
     available_dbs = get_available_databases()
     if available_dbs:
         st.caption("(Filtering by database coming soon)")
