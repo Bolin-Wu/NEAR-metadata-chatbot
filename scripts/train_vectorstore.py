@@ -8,6 +8,7 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from xml_parser import parse_xml_to_text
+from json_parser import parse_json_to_document
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
@@ -51,16 +52,7 @@ def process_xmls_to_vectorstore(data_dir: str, database_name: str = None):
     json_files = glob.glob(os.path.join(data_dir, "*.json"))
     for json_file in json_files:
         try:
-            with open(json_file, 'r', encoding='utf-8') as f:
-                json_text = f.read()
-            doc = Document(
-                page_content=f"Database Description: {json_text}",
-                metadata={
-                    "source": os.path.basename(json_file), 
-                    "database": database_name or "unknown",
-                    "type": "database_description"
-                }
-            )
+            doc = parse_json_to_document(json_file, database_name=database_name)
             documents.append(doc)
             print(f"  ✓ Loaded {os.path.basename(json_file)}")
         except Exception as e:
