@@ -25,7 +25,9 @@ st.set_page_config(
 with st.sidebar:
     logo_path = Path("logo/NEAR-chatbot.jpg")
     if logo_path.exists():
-        st.image(str(logo_path), width=200)
+        col1, col2, col3 = st.columns([0.5, 2.5, 0.5])
+        with col2:
+            st.image(str(logo_path), use_container_width=True)
     st.markdown("---")
     
     # Display available databases for future filtering
