@@ -31,7 +31,7 @@ with st.sidebar:
     st.markdown("---")
     
     # Display available databases for future filtering
-    st.subheader("💡 Available Databases")
+    st.subheader("Available Databases")
     available_dbs = [
         "Betula",
         "GAS_SNAC_S",
@@ -172,6 +172,22 @@ if vectorstore is None:
     st.stop()
 else:
     st.success(f"✓ Vector store loaded with {vectorstore._collection.count()} items. Ready to chat!")
+
+# Display search suggestions
+st.markdown("### 💡 Try asking about...")
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.caption("- Cognitive assessment variables")
+    st.caption("- Sleep quality measurements")
+    st.caption("- Social engagement variables")
+with col2:
+    st.caption("- Tell me about the SNAC-K cohort")
+    st.caption("- Physical activity variables")
+    st.caption("- Medication and treatment data")
+with col3:
+    st.caption("- Mental health assessment variables")
+    st.caption("- Nutrition and diet variables")
+    st.caption("- Biomarker measurements")
 
 # ── Chat ──────────────────────────────────────────────────────────────────────
 if "messages" not in st.session_state:
