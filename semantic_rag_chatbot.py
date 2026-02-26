@@ -14,7 +14,6 @@ from langchain_core.prompts import PromptTemplate
 from dotenv import load_dotenv
 import shutil
 import zipfile
-import requests
 
 load_dotenv()
 
@@ -72,90 +71,47 @@ except (FileNotFoundError, KeyError, AttributeError):
     GROQ_API_KEY = os.getenv("GROQ_api_key")
 
 # Cloud storage URL for production vector database (optional)
-# Use GitHub Releases: upload chroma_prod_db.zip to a release and get the download URL
-# Example: https://github.com/username/repo/releases/download/v1.0/chroma_prod_db.zip
+# Use HuggingFace Hub: huggingface_hub.download() with repo_id
+# Example: hf_download('your-username/near-chroma-db', 'chroma_prod_db.zip')
 try:
-    CHROMA_PROD_DB_URL = st.secrets.get("CHROMA_PROD_DB_URL")
+    HUGGINGFACE_REPO_ID = st.secrets.get("HUGGINGFACE_REPO_ID")
 except:
-    CHROMA_PROD_DB_URL = os.getenv("CHROMA_PROD_DB_URL")
+    HUGGINGFACE_REPO_ID = os.getenv("HUGGINGFACE_REPO_ID")
 
 # ── Functions ─────────────────────────────────────────────────────────────────
 def initialize_production_db():
-    """Download production database from GitHub Releases if not present locally.
+    """Download production database from HuggingFace Hub if not present locally (optional).
     
-    Falls back to demo database if download fails.
-    Only runs once per session.
+    If HUGGINGFACE_REPO_ID is not configured, uses demo database.
     
-    Setup:
-    1. Create the correct zip file:
-       cd chroma_prod_db & zip -r ../chroma_prod_db.zip . & cd ..
-       (This creates a zip with the database contents directly, not nested)
-    2. Create a GitHub release in your repo
-    3. Upload chroma_prod_db.zip as a release asset
-    4. Copy the download link: https://github.com/user/repo/releases/download/v1.0/chroma_prod_db.zip
-    5. Add to .streamlit/secrets.toml: CHROMA_PROD_DB_URL = "https://..."
+    Setup (optional):
+    1. Push chroma_prod_db to HuggingFace Hub:
+       huggingface-cli repo create near-chroma-prod-db --type dataset
+       huggingface-cli upload near-chroma-prod-db ./chroma_prod_db chroma_prod_db
+    2. Set environment variable or secret:
+       HUGGINGFACE_REPO_ID = "your-username/near-chroma-prod-db"
     """
-    # Check if local copy exists and is valid
-    needs_download = False
-    
     if os.path.exists(CHROMA_PROD_DB) and os.listdir(CHROMA_PROD_DB):
-        # Check if it has the wrong structure (nested chroma_prod_db folder)
-        contents = os.listdir(CHROMA_PROD_DB)
-        if "chroma_prod_db" in contents:
-            # Old broken extraction - delete and re-download
-            st.warning("🔄 Detected old extraction format. Re-downloading database...")
-            shutil.rmtree(CHROMA_PROD_DB)
-            needs_download = True
-        else:
-            # Has the correct structure
-            return
-    else:
-        needs_download = True
+        return  # Already have local copy
     
-    if not needs_download:
-        return
-    
-    if not CHROMA_PROD_DB_URL:
-        st.warning(
-            "⚠️ Production database not available locally and CHROMA_PROD_DB_URL not configured.\n\n"
-            "**Setup Instructions:**\n"
-            "1. Zip chroma_prod_db: `zip -r chroma_prod_db.zip chroma_prod_db/`\n"
-            "2. Create a GitHub release in your repository\n"
-            "3. Upload chroma_prod_db.zip as a release asset\n"
-            "4. Copy the download URL from the release\n"
-            "5. Add to `.streamlit/secrets.toml`: `CHROMA_PROD_DB_URL = \"https://...\"`\n\n"
-            "Using demo database for now."
-        )
+    if not HUGGINGFACE_REPO_ID:
+        st.info("ℹ️ Production vector database not configured. Using demo database.")
         return
     
     try:
+        from huggingface_hub import hf_hub_download
+        
         progress_placeholder = st.empty()
-        progress_placeholder.info("📥 Downloading production database from GitHub Releases...")
+        progress_placeholder.info("📥 Downloading production database from HuggingFace Hub...")
         
-        # Create directory if it doesn't exist
-        os.makedirs(CHROMA_PROD_DB, exist_ok=True)
+        # Download zip from HuggingFace Hub
+        zip_path = hf_hub_download(
+            repo_id=HUGGINGFACE_REPO_ID,
+            filename="chroma_prod_db.zip",
+            repo_type="dataset"
+        )
         
-        # Download the zipped database from GitHub
-        response = requests.get(CHROMA_PROD_DB_URL, timeout=120, stream=True)
-        response.raise_for_status()
-        
-        # Save the zip file to a temporary location
-        zip_path = os.path.join(tempfile.gettempdir(), "chroma_prod_db.zip")
-        total_size = int(response.headers.get('content-length', 0))
-        
-        with open(zip_path, "wb") as f:
-            downloaded = 0
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    # Update progress (no intermediate messages, just update the same one)
-                    if total_size > 0:
-                        progress = min(downloaded / total_size, 1.0)
-                        if int(progress * 10) % 1 == 0:
-                            progress_placeholder.info(f"📥 Downloaded {downloaded / (1024*1024):.1f} MB...")
-        
-        # Extract to temp directory first (zip contains 'chroma_prod_db/' folder)
+        # Extract to temp directory
         progress_placeholder.info("📦 Extracting database...")
         temp_dir = tempfile.mkdtemp()
         
@@ -163,35 +119,23 @@ def initialize_production_db():
             with zipfile.ZipFile(zip_path, "r") as zip_ref:
                 zip_ref.extractall(temp_dir)
             
-            # The zip file contains 'chroma_prod_db/' as the top-level folder
             extracted_db = os.path.join(temp_dir, "chroma_prod_db")
             
             if os.path.exists(extracted_db):
-                # Remove old chroma_prod_db directory if it exists
                 if os.path.exists(CHROMA_PROD_DB):
                     shutil.rmtree(CHROMA_PROD_DB)
-                
-                # Move extracted directory to final location
                 shutil.move(extracted_db, CHROMA_PROD_DB)
                 progress_placeholder.success("✅ Production database downloaded and ready!")
             else:
-                progress_placeholder.error("❌ Extracted data structure was unexpected. Try recreating the zip file.")
+                progress_placeholder.error("❌ Extracted data structure unexpected.")
         finally:
-            # Clean up temporary directory
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
-            # Clean up zip file
-            if os.path.exists(zip_path):
-                os.remove(zip_path)
         
-    except requests.exceptions.Timeout:
-        st.error("❌ Download timeout. The database file may be too large. Using local production database.")
-        if os.path.exists(CHROMA_PROD_DB):
-            shutil.rmtree(CHROMA_PROD_DB)
+    except ImportError:
+        st.warning("⚠️ Install huggingface_hub: `pip install huggingface_hub`")
     except Exception as e:
-        st.error(f"❌ Could not download production database: {e}\n\nUsing demo database instead.")
-        if os.path.exists(CHROMA_PROD_DB):
-            shutil.rmtree(CHROMA_PROD_DB)
+        st.warning(f"⚠️ Could not download from HuggingFace: {e}\nUsing demo database.")
 
 @st.cache_resource(show_spinner="Preparing embeddings model...")
 def get_embeddings():
@@ -495,8 +439,8 @@ with st.expander("🔧 Debug Info"):
 if st.session_state.vectorstore is None:
     if not st.session_state.available_databases:
         st.error("❌ No databases available. Check the Debug Info below.")
-        if DEPLOYMENT_ENV.lower() == "production" and not CHROMA_PROD_DB_URL:
-            st.error("⚠️ CHROMA_PROD_DB_URL not configured in secrets!")
+        if DEPLOYMENT_ENV.lower() == "production" and not HUGGINGFACE_REPO_ID:
+            st.info("ℹ️ Tip: Configure HUGGINGFACE_REPO_ID to use production database, or train locally.")
     else:
         st.error(f"❌ Database not loaded. Please select a database in the sidebar.")
     st.stop()
