@@ -12,11 +12,8 @@ from json_parser import parse_json_to_document
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-CHROMA_DEMO_DB = "./chroma_demo_db"      # Small demo database (push to GitHub)
-CHROMA_PROD_DB = "./chroma_prod_db"      # Large production database (use cloud storage)
+CHROMA_DB = "./chroma_prod_db"          # Production database
 DATA_ROOT = "./data"
-TRAIN_MODE = "all"  # "specific" or "all"
-SELECTED_DATABASE = "SNAC-K"  # Only used if TRAIN_MODE == "specific"
 
 # Functions ─────────────────────────────────────────────────────────────────
 def get_embeddings():
@@ -100,42 +97,15 @@ if __name__ == "__main__":
     
     if not databases:
         print(f"\n✗ No databases found in {DATA_ROOT}")
-        exit(1)
+    # Train all databases to production
+    selected_databases = databases
+    target_db = CHROMA_DB
     
-    # Choose environment (demo or production)
-    print("\nChoose deployment environment:")
-    print("1. Demo (to push to GitHub) - will overwrite chroma_demo_db")
-    print("2. Production (cloud storage) - will create/overwrite chroma_prod_db")
-    env_choice = input("Enter choice (1 or 2): ").strip()
+    print(f"\nMode: Train all databases")
+    print(f"Databases ({len(databases)}): {', '.join(databases)}")
+    print(f"Target: {target_db}")
     
-    if env_choice == "1":
-        target_db = CHROMA_DEMO_DB
-        env_name = "DEMO"
-    elif env_choice == "2":
-        target_db = CHROMA_PROD_DB
-        env_name = "PRODUCTION"
-    else:
-        print("Invalid choice.")
-        exit(1)
-    
-    # Determine which databases to train on
-    if TRAIN_MODE == "specific":
-        if SELECTED_DATABASE not in databases:
-            print(f"\n✗ Database '{SELECTED_DATABASE}' not found in {DATA_ROOT}")
-            print(f"Available databases: {', '.join(databases)}")
-            exit(1)
-        selected_databases = [SELECTED_DATABASE]
-        print(f"\nMode: Train on specific database")
-        print(f"Database: {SELECTED_DATABASE}")
-    elif TRAIN_MODE == "all":
-        selected_databases = databases
-        print(f"\nMode: Train on all databases")
-        print(f"Databases ({len(databases)}): {', '.join(databases)}")
-    else:
-        print(f"\n✗ Invalid TRAIN_MODE: {TRAIN_MODE}. Use 'specific' or 'all'")
-        exit(1)
-    
-    confirm = input(f"\nProceed with {env_name} training? (y/n): ").strip().lower()
+    confirm = input(f"\nProceed with training? (y/n): ").strip().lower()
     
     if confirm != 'y':
         print("Training cancelled.")
@@ -153,7 +123,7 @@ if __name__ == "__main__":
     # Train vector store (separate collection for each database)
     try:
         embeddings = get_embeddings()
-        print(f"\nCreating embeddings and storing in {env_name} database...")
+        print(f"\nCreating embeddings and storing in production database...")
         print(f"Each database will have its own collection.\n")
         
         total_items = 0
@@ -177,15 +147,12 @@ if __name__ == "__main__":
             print(f"    ✓ Collection '{collection_name}' created with {items_count} items")
             total_items += items_count
         
-        print(f"\n✓ {env_name} training complete!")
+        print(f"\n✓ Training complete!")
         print(f"Total items across all collections: {total_items}")
         print(f"Vector store saved to: {os.path.abspath(target_db)}")
         print(f"Collections created: {', '.join([f'{db.lower()}_metadata' for db in selected_databases])}")
-        
-        if env_choice == "1":
-            print("\n💡 Next step: Push chroma_demo_db to GitHub")
-        else:
-            print("\n💡 Next step: Upload chroma_prod_db to cloud storage (S3, GCS, etc.)")
+        print("\n💡 Next step: Upload chroma_prod_db to HuggingFace Hub")
+        print("   huggingface-cli upload bobo200612/near-chroma-prod-db ./chroma_prod_db.zip chroma_prod_db.zip --repo-type=dataset")
             
     except Exception as e:
         print(f"\n✗ Error during training: {e}")

@@ -25,8 +25,7 @@ st.set_page_config(
 )
 
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-CHROMA_DEMO_DB = "./chroma_demo_db"      # Small demo (in GitHub)
-CHROMA_PROD_DB = "./chroma_prod_db"      # Production (cloud storage)
+CHROMA_DB = "./chroma_prod_db"          # Production database (cloud storage)
 DATA_ROOT = "./data"
 
 # Known databases (hardcoded as fallback when data/ folder not available)
@@ -34,18 +33,6 @@ KNOWN_DATABASES = [
     "Betula", "GAS_SNAC_S", "GENDER", "H70", "KP", 
     "OCTO-Twin", "SATSA", "SNAC-B", "SNAC-K", "SNAC-N", "SWEOLD"
 ]
-
-# Safe way to get deployment environment (default to "demo")
-try:
-    DEPLOYMENT_ENV = st.secrets["DEPLOYMENT_ENV"]
-except (FileNotFoundError, KeyError, AttributeError):
-    DEPLOYMENT_ENV = "demo"
-
-# Select which database to use
-if DEPLOYMENT_ENV.lower() == "production":
-    ACTIVE_CHROMA_DIR = CHROMA_PROD_DB
-else:
-    ACTIVE_CHROMA_DIR = CHROMA_DEMO_DB
 
 # Safe way to get API key
 try:
@@ -63,23 +50,21 @@ except:
 
 # ── Functions ─────────────────────────────────────────────────────────────────
 def initialize_production_db():
-    """Download production database from HuggingFace Hub if not present locally (optional).
+    """Download production database from HuggingFace Hub if not present locally.
     
-    If HUGGINGFACE_REPO_ID is not configured, uses demo database.
-    
-    Setup (optional):
+    Setup:
     1. Push chroma_prod_db to HuggingFace Hub:
        huggingface-cli repo create near-chroma-prod-db --type dataset
        huggingface-cli upload near-chroma-prod-db ./chroma_prod_db chroma_prod_db
     2. Set environment variable or secret:
        HUGGINGFACE_REPO_ID = "your-username/near-chroma-prod-db"
     """
-    if os.path.exists(CHROMA_PROD_DB) and os.listdir(CHROMA_PROD_DB):
+    if os.path.exists(CHROMA_DB) and os.listdir(CHROMA_DB):
         return  # Already have local copy
     
     if not HUGGINGFACE_REPO_ID:
-        st.info("ℹ️ Production vector database not configured. Using demo database.")
-        return
+        st.error("❌ HUGGINGFACE_REPO_ID not configured. Cannot load production database.")
+        st.stop()
     
     try:
         from huggingface_hub import hf_hub_download
@@ -105,37 +90,40 @@ def initialize_production_db():
             extracted_db = os.path.join(temp_dir, "chroma_prod_db")
             
             if os.path.exists(extracted_db):
-                if os.path.exists(CHROMA_PROD_DB):
-                    shutil.rmtree(CHROMA_PROD_DB)
-                shutil.move(extracted_db, CHROMA_PROD_DB)
-                progress_placeholder.success("✅ Production database downloaded and ready!")
+                if os.path.exists(CHROMA_DB):
+                    shutil.rmtree(CHROMA_DB)
+                shutil.move(extracted_db, CHROMA_DB)
+                progress_placeholder.success("✅ Database downloaded and ready!")
             else:
-                progress_placeholder.error("❌ Extracted data structure unexpected.")
+                progress_placeholder.error("❌ Extracted data structure unexpected. Stopping.")
+                st.stop()
         finally:
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
         
     except ImportError:
-        st.warning("⚠️ Install huggingface_hub: `pip install huggingface_hub`")
+        st.error("❌ Install huggingface_hub: `pip install huggingface_hub`")
+        st.stop()
     except Exception as e:
-        st.warning(f"⚠️ Could not download from HuggingFace: {e}\nUsing demo database.")
+        st.error(f"❌ Could not download from HuggingFace: {e}")
+        st.stop()
 
 @st.cache_resource(show_spinner="Preparing embeddings model...")
 def get_embeddings():
     return HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
 
 def load_vectorstore(database_name: str):
-    """Load vector store for a specific database from disk (demo or production).
+    """Load vector store for a specific database from disk.
     
     Args:
         database_name: Name of the database (e.g., 'Betula', 'SNAC-K')
     """
-    if os.path.exists(ACTIVE_CHROMA_DIR):
+    if os.path.exists(CHROMA_DB):
         try:
             embeddings = get_embeddings()
             collection_name = f"{database_name.lower()}_metadata"
             vectorstore = Chroma(
-                persist_directory=ACTIVE_CHROMA_DIR,
+                persist_directory=CHROMA_DB,
                 embedding_function=embeddings,
                 collection_name=collection_name
             )
@@ -153,13 +141,12 @@ def get_available_databases():
     Works even if ./data folder is not present (e.g., on Streamlit Cloud).
     """
     databases = []
-    collection_status = {}
     
     try:
         # Check if the Chroma directory exists
-        if not os.path.exists(ACTIVE_CHROMA_DIR):
-            st.warning(f"⚠️ Chroma directory not found: {ACTIVE_CHROMA_DIR}")
-            return []
+        if not os.path.exists(CHROMA_DB):
+            st.error(f"❌ Chroma directory not found: {CHROMA_DB}")
+            st.stop()
         
         embeddings = get_embeddings()
         
@@ -168,16 +155,15 @@ def get_available_databases():
             collection_name = f"{db_name.lower()}_metadata"
             try:
                 vectorstore = Chroma(
-                    persist_directory=ACTIVE_CHROMA_DIR,
+                    persist_directory=CHROMA_DB,
                     embedding_function=embeddings,
                     collection_name=collection_name
                 )
                 count = vectorstore._collection.count()
-                collection_status[db_name] = count
                 if count > 0:
                     databases.append(db_name)
             except Exception as e:
-                collection_status[db_name] = f"Error: {str(e)}"
+                pass
         
         return sorted(databases)
     except Exception as e:
@@ -207,7 +193,7 @@ if not st.session_state.vectorstores_loading and st.session_state.available_data
                 try:
                     collection_name = f"{db.lower()}_metadata"
                     vectorstore = Chroma(
-                        persist_directory=ACTIVE_CHROMA_DIR,
+                        persist_directory=CHROMA_DB,
                         embedding_function=embeddings,
                         collection_name=collection_name
                     )
@@ -372,20 +358,11 @@ def should_use_table_format(context_docs):
 st.title("💬 NEAR Metadata Chatbot")
 
 # Initialize production database from cloud if needed (must be after st.set_page_config)
-if DEPLOYMENT_ENV.lower() == "production":
-    initialize_production_db()
-
-# Display which database is being used
-if DEPLOYMENT_ENV.lower() == "production":
-    st.info("🛠️ **Production** mode")
-else:
-    st.info("🖥️ **Demo** mode")
+initialize_production_db()
 
 if st.session_state.vectorstore is None:
     if not st.session_state.available_databases:
-        st.error("❌ No databases available. Check the Debug Info below.")
-        if DEPLOYMENT_ENV.lower() == "production" and not HUGGINGFACE_REPO_ID:
-            st.info("ℹ️ Tip: Configure HUGGINGFACE_REPO_ID to use production database, or train locally.")
+        st.error("❌ No databases available.")
     else:
         st.error(f"❌ Database not loaded. Please select a database in the sidebar.")
     st.stop()
@@ -416,7 +393,7 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-if prompt := st.chat_input("Ask about your metadata..."):
+if prompt := st.chat_input("Ask about NEAR metadata..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
