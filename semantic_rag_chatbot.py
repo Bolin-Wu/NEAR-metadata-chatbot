@@ -10,6 +10,9 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_groq import ChatGroq  
 from langchain_core.prompts import PromptTemplate
 from dotenv import load_dotenv
+import shutil
+import zipfile
+import requests
 
 load_dotenv()
 
@@ -50,7 +53,88 @@ try:
 except (FileNotFoundError, KeyError, AttributeError):
     GROQ_API_KEY = os.getenv("GROQ_api_key")
 
+# Cloud storage URL for production vector database (optional)
+# Use GitHub Releases: upload chroma_prod_db.zip to a release and get the download URL
+# Example: https://github.com/username/repo/releases/download/v1.0/chroma_prod_db.zip
+try:
+    CHROMA_PROD_DB_URL = st.secrets.get("CHROMA_PROD_DB_URL")
+except:
+    CHROMA_PROD_DB_URL = os.getenv("CHROMA_PROD_DB_URL")
+
 # ── Functions ─────────────────────────────────────────────────────────────────
+def initialize_production_db():
+    """Download production database from GitHub Releases if not present locally.
+    
+    Falls back to demo database if download fails.
+    Only runs once per session.
+    
+    Setup:
+    1. Zip your chroma_prod_db folder: zip -r chroma_prod_db.zip chroma_prod_db/
+    2. Create a GitHub release in your repo
+    3. Upload chroma_prod_db.zip as a release asset
+    4. Copy the download link: https://github.com/user/repo/releases/download/v1.0/chroma_prod_db.zip
+    5. Add to .streamlit/secrets.toml: CHROMA_PROD_DB_URL = "https://..."
+    """
+    if os.path.exists(CHROMA_PROD_DB) and os.listdir(CHROMA_PROD_DB):
+        return  # Already have local copy
+    
+    if not CHROMA_PROD_DB_URL:
+        st.warning(
+            "⚠️ Production database not available locally and CHROMA_PROD_DB_URL not configured.\n\n"
+            "**Setup Instructions:**\n"
+            "1. Zip chroma_prod_db: `zip -r chroma_prod_db.zip chroma_prod_db/`\n"
+            "2. Create a GitHub release in your repository\n"
+            "3. Upload chroma_prod_db.zip as a release asset\n"
+            "4. Copy the download URL from the release\n"
+            "5. Add to `.streamlit/secrets.toml`: `CHROMA_PROD_DB_URL = \"https://...\"`\n\n"
+            "Using demo database for now."
+        )
+        return
+    
+    try:
+        st.info("📥 Downloading production database from GitHub Releases...")
+        
+        # Create directory if it doesn't exist
+        os.makedirs(CHROMA_PROD_DB, exist_ok=True)
+        
+        # Download the zipped database from GitHub
+        response = requests.get(CHROMA_PROD_DB_URL, timeout=120, stream=True)
+        response.raise_for_status()
+        
+        # Save the zip file
+        zip_path = f"{CHROMA_PROD_DB}/temp.zip"
+        total_size = int(response.headers.get('content-length', 0))
+        
+        with open(zip_path, "wb") as f:
+            downloaded = 0
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    # Show progress
+                    if total_size > 0:
+                        progress = min(downloaded / total_size, 1.0)
+                        # Only log every 10%
+                        if int(progress * 10) % 1 == 0:
+                            st.info(f"📥 Downloaded {downloaded / (1024*1024):.1f} MB...")
+        
+        # Extract to chroma_prod_db
+        st.info("📦 Extracting database...")
+        with zipfile.ZipFile(zip_path, "r") as zip_ref:
+            zip_ref.extractall(CHROMA_PROD_DB)
+        
+        os.remove(zip_path)
+        st.success("✅ Production database downloaded and ready!")
+        
+    except requests.exceptions.Timeout:
+        st.error("❌ Download timeout. The database file may be too large. Using local production database.")
+        if os.path.exists(CHROMA_PROD_DB):
+            shutil.rmtree(CHROMA_PROD_DB)
+    except Exception as e:
+        st.error(f"❌ Could not download production database: {e}\n\nUsing demo database instead.")
+        if os.path.exists(CHROMA_PROD_DB):
+            shutil.rmtree(CHROMA_PROD_DB)
+
 @st.cache_resource(show_spinner="Preparing embeddings model...")
 def get_embeddings():
     return HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
@@ -298,6 +382,10 @@ def should_use_table_format(context_docs):
 # ── Main App ──────────────────────────────────────────────────────────────────
 
 st.title("💬 NEAR Metadata Chatbot")
+
+# Initialize production database from cloud if needed (must be after st.set_page_config)
+if DEPLOYMENT_ENV.lower() == "production":
+    initialize_production_db()
 
 # Display which database is being used
 if DEPLOYMENT_ENV.lower() == "production":

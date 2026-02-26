@@ -17,6 +17,7 @@ chroma_prod_db/
 metadata_excels/
 *.xlsx  
 data/
+*.zip
 
 
 # OS
