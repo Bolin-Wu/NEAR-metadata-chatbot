@@ -35,22 +35,6 @@ KNOWN_DATABASES = [
     "OCTO-Twin", "SATSA", "SNAC-B", "SNAC-K", "SNAC-N", "SWEOLD"
 ]
 
-# Helper function to resolve paths (handles different working directories)
-def resolve_path(relative_path):
-    """Resolve relative path, checking current dir and parent dirs."""
-    # Try relative path first
-    if os.path.exists(relative_path):
-        return os.path.abspath(relative_path)
-    
-    # Try from script directory
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    alt_path = os.path.join(script_dir, relative_path)
-    if os.path.exists(alt_path):
-        return alt_path
-    
-    # Return the relative path anyway (might still work)
-    return relative_path
-
 # Safe way to get deployment environment (default to "demo")
 try:
     DEPLOYMENT_ENV = st.secrets["DEPLOYMENT_ENV"]
@@ -59,9 +43,9 @@ except (FileNotFoundError, KeyError, AttributeError):
 
 # Select which database to use
 if DEPLOYMENT_ENV.lower() == "production":
-    ACTIVE_CHROMA_DIR = resolve_path(CHROMA_PROD_DB)
+    ACTIVE_CHROMA_DIR = CHROMA_PROD_DB
 else:
-    ACTIVE_CHROMA_DIR = resolve_path(CHROMA_DEMO_DB)
+    ACTIVE_CHROMA_DIR = CHROMA_DEMO_DB
 
 # Safe way to get API key
 try:
