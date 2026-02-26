@@ -393,8 +393,22 @@ if DEPLOYMENT_ENV.lower() == "production":
 else:
     st.info("🖥️ Using **Demo** vector database")
 
+# Debug info (remove in production)
+with st.expander("🔧 Debug Info"):
+    st.write(f"**DEPLOYMENT_ENV:** {DEPLOYMENT_ENV}")
+    st.write(f"**ACTIVE_CHROMA_DIR:** {ACTIVE_CHROMA_DIR}")
+    st.write(f"**Available Databases:** {st.session_state.available_databases}")
+    st.write(f"**Selected Database:** {st.session_state.selected_database}")
+    st.write(f"**Cache Keys:** {list(st.session_state.vectorstores_cache.keys())}")
+    st.write(f"**Vectorstore Loaded:** {st.session_state.vectorstore is not None}")
+
 if st.session_state.vectorstore is None:
-    st.error(f"❌ Database not loaded. Please select a database in the sidebar.")
+    if not st.session_state.available_databases:
+        st.error("❌ No databases available. Check the Debug Info below.")
+        if DEPLOYMENT_ENV.lower() == "production" and not CHROMA_PROD_DB_URL:
+            st.error("⚠️ CHROMA_PROD_DB_URL not configured in secrets!")
+    else:
+        st.error(f"❌ Database not loaded. Please select a database in the sidebar.")
     st.stop()
 else:
     st.success(f"✓ Vector store loaded for {st.session_state.selected_database}. Ready to chat!")
@@ -564,7 +578,7 @@ if prompt := st.chat_input("Ask about your metadata..."):
         # Prepend database hint to response
         selected_db = st.session_state.get("selected_database")
         if selected_db and response:
-            response_with_hint = f"📍**The answer is based on: {selected_db}**\n\n{response}"
+            response_with_hint = f"📍 **{selected_db}**\n\n{response}"
         else:
             response_with_hint = response
         
