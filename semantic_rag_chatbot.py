@@ -21,40 +21,16 @@ st.set_page_config(
     menu_items=None
 )
 
-# Add logo to sidebar
-with st.sidebar:
-    logo_path = Path("logo/NEAR-chatbot.jpg")
-    if logo_path.exists():
-        col1, col2, col3 = st.columns([0.5, 2.5, 0.5])
-        with col2:
-            st.image(str(logo_path), use_container_width=True)
-    st.markdown("---")
-    
-    # Display available databases for future filtering
-    st.subheader("Available Databases")
-    available_dbs = [
-        "Betula",
-        "GAS_SNAC_S",
-        "GENDER",
-        "H70",
-        "KP",
-        "OCTO-Twin",
-        "SATSA",
-        "SNAC-B",
-        "SNAC-K",
-        "SNAC-N",
-        "SWEOLD"
-    ]
-    st.caption("(Filtering by database coming soon)")
-    for db in available_dbs:
-        st.caption(f"- {db}")
-    
-    st.markdown("---")
-
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 CHROMA_DEMO_DB = "./chroma_demo_db"      # Small demo (in GitHub)
 CHROMA_PROD_DB = "./chroma_prod_db"      # Production (cloud storage)
 DATA_ROOT = "./data"
+
+# Known databases (hardcoded as fallback when data/ folder not available)
+KNOWN_DATABASES = [
+    "Betula", "GAS_SNAC_S", "GENDER", "H70", "KP", 
+    "OCTO-Twin", "SATSA", "SNAC-B", "SNAC-K", "SNAC-N", "SWEOLD"
+]
 
 # Safe way to get deployment environment (default to "demo")
 try:
@@ -79,46 +55,179 @@ except (FileNotFoundError, KeyError, AttributeError):
 def get_embeddings():
     return HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
 
-def load_vectorstore():
-    """Load vector store from disk (demo or production)."""
+def load_vectorstore(database_name: str):
+    """Load vector store for a specific database from disk (demo or production).
+    
+    Args:
+        database_name: Name of the database (e.g., 'Betula', 'SNAC-K')
+    """
     if os.path.exists(ACTIVE_CHROMA_DIR):
         try:
             embeddings = get_embeddings()
+            collection_name = f"{database_name.lower()}_metadata"
             vectorstore = Chroma(
                 persist_directory=ACTIVE_CHROMA_DIR,
                 embedding_function=embeddings,
-                collection_name="xml_metadata"
+                collection_name=collection_name
             )
             if vectorstore._collection.count() > 0:
                 return vectorstore
         except Exception as e:
-            st.error(f"Error loading vector store: {e}")
+            st.error(f"Error loading vector store for {database_name}: {e}")
     
     return None
 
-def get_database_description(query, vectorstore):
-    """Retrieve database description from vector store based on user query."""
+# Known databases (in case data/ folder not available)
+def get_available_databases():
+    """Get list of available databases by querying Chroma collections.
+    
+    Works even if ./data folder is not present (e.g., on Streamlit Cloud).
+    """
+    databases = []
+    
+    try:
+        if not os.path.exists(ACTIVE_CHROMA_DIR):
+            return []
+        
+        embeddings = get_embeddings()
+        
+        # Check each known database to see if its collection exists in Chroma
+        for db_name in KNOWN_DATABASES:
+            collection_name = f"{db_name.lower()}_metadata"
+            try:
+                vectorstore = Chroma(
+                    persist_directory=ACTIVE_CHROMA_DIR,
+                    embedding_function=embeddings,
+                    collection_name=collection_name
+                )
+                # If collection has documents, it's available
+                if vectorstore._collection.count() > 0:
+                    databases.append(db_name)
+            except:
+                # Collection doesn't exist, skip it
+                pass
+        
+        return sorted(databases)
+    except Exception as e:
+        st.warning(f"Could not retrieve available databases: {e}")
+        return []
+
+# Initialize available databases (before sidebar)
+if "available_databases_loaded" not in st.session_state:
+    with st.spinner("Discovering available databases..."):
+        st.session_state.available_databases = get_available_databases()
+        st.session_state.available_databases_loaded = True
+else:
+    pass
+
+# Initialize vectorstores cache (preload all databases on first access)
+if "vectorstores_cache" not in st.session_state:
+    st.session_state.vectorstores_cache = {}
+    st.session_state.vectorstores_loading = False
+
+# Preload all vectorstores in the background (cache them)
+if not st.session_state.vectorstores_loading and st.session_state.available_databases:
+    if len(st.session_state.vectorstores_cache) == 0:
+        st.session_state.vectorstores_loading = True
+        with st.spinner("Preloading vector stores..."):
+            embeddings = get_embeddings()
+            for db in st.session_state.available_databases:
+                try:
+                    collection_name = f"{db.lower()}_metadata"
+                    vectorstore = Chroma(
+                        persist_directory=ACTIVE_CHROMA_DIR,
+                        embedding_function=embeddings,
+                        collection_name=collection_name
+                    )
+                    if vectorstore._collection.count() > 0:
+                        st.session_state.vectorstores_cache[db] = vectorstore
+                except Exception as e:
+                    st.warning(f"Could not preload {db}: {e}")
+        st.session_state.vectorstores_loading = False
+
+# Initialize vectorstore as None (will be set from cache on database selection)
+if "vectorstore" not in st.session_state:
+    st.session_state.vectorstore = None
+    st.session_state.selected_database = None
+
+# Add logo and controls to sidebar
+with st.sidebar:
+    logo_path = Path("logo/NEAR-chatbot.jpg")
+    if logo_path.exists():
+        col1, col2, col3 = st.columns([0.5, 2.5, 0.5])
+        with col2:
+            st.image(str(logo_path), use_container_width=True)
+    st.markdown("---")
+    
+    # Database selection
+    st.subheader("Select Database")
+    if st.session_state.available_databases:
+        selected_database = st.radio(
+            "Choose a database to query:",
+            options=st.session_state.available_databases,
+            index=0,
+            key="database_radio"
+        )
+        
+        # Switch to selected database (from cache - instant!)
+        if selected_database != st.session_state.selected_database:
+            if selected_database in st.session_state.vectorstores_cache:
+                st.session_state.vectorstore = st.session_state.vectorstores_cache[selected_database]
+                st.session_state.selected_database = selected_database
+            else:
+                st.error(f"Vector store for {selected_database} not available")
+        
+    else:
+        st.warning("No databases available")
+    
+    st.markdown("---")
+    
+    # Coming Soon / Roadmap
+    with st.expander("🚀 Coming Soon"):
+        st.markdown("""
+        New features under development:
+        
+        - **Multi-Database Search**: Query across multiple databases
+        - **Export Results**: Download as CSV/Excel
+        - **Search History**: Track previous searches
+        
+        If you have suggestions or want to contribute, please reach out!
+        
+        Maintainer: Bolin Wu (NEAR)
+        📧 [bolin.wu@ki.se](mailto:bolin.wu@ki.se)
+        """)
+
+def get_database_description(vectorstore):
+    """Retrieve database description from the loaded vector store collection.
+    
+    Since each collection is for a single database, we just need to find the 
+    database_description document in the current collection.
+    """
     if vectorstore is None:
         return ""
     
     try:
-        # Query for database description documents relevant to user's question
-        retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
-        docs = retriever.invoke(query)
+        collection = vectorstore._collection
+        all_docs = collection.get()
         
-        for doc in docs:
-            if doc.metadata.get("type") == "database_description":
-                return doc.page_content
+        if all_docs and all_docs.get('metadatas'):
+            for i, metadata in enumerate(all_docs['metadatas']):
+                if metadata.get("type") == "database_description":
+                    # Return the content of this document
+                    if all_docs.get('documents') and i < len(all_docs['documents']):
+                        return all_docs['documents'][i]
+        
+        return ""
+        
     except Exception as e:
         st.warning(f"Could not retrieve database description: {e}")
-    
-    return ""
+        return ""
 
 def is_variable_question(question):
     """Determine if the question is about specific variables or general cohort info."""
     variable_keywords = [
         "variable", "variables","field", "column", "measure", "data", "table", 
-        "available in", "which variables", "what variables", "what data",
+        "available in", "which variables",
         "categories", "values", "definition", "how to find",
         "named", "called", "list of", "question", "questions",
         "raw variable name", "labels", "source"
@@ -128,31 +237,67 @@ def is_variable_question(question):
     return any(keyword in question_lower for keyword in variable_keywords)
 
 def filter_and_organize_context(query, vectorstore):
-    """Retrieve and organize context - only variable definitions for efficiency."""
+    """Retrieve and organize context - only variable definitions.
+    
+    Since each collection is for a single database, we just need to:
+    1. Do semantic search
+    2. Filter for variable_definitions type
+    3. Return up to 20 results
+    
+    Args:
+        query: User's question
+        vectorstore: Chroma vector store (already filtered to selected database)
+    
+    Returns:
+        tuple: (context_text, full_docs_list)
+    """
     if vectorstore is None:
-        return ""
+        return "", []
     
     try:
+        # Perform semantic search on the selected database collection
         retriever = vectorstore.as_retriever(search_kwargs={"k": 20})
         docs = retriever.invoke(query)
         
         var_defs = []
         
         for doc in docs:
+            # Only include variable definitions
             if doc.metadata.get("type") == "variable_definitions":
                 var_defs.append(doc)
         
-        # Return only variable definitions (description cached separately)
+        # Return variable definitions and full docs list
         context_text = "\n\n---\n\n".join([doc.page_content for doc in var_defs])
-        return context_text
+        return context_text, var_defs
     except Exception as e:
         st.error(f"Error retrieving context: {e}")
-        return ""
+        return "", []
+
+def should_use_table_format(context_docs):
+    """Intelligently decide whether to use table format based on retrieved content.
+    
+    If retrieved documents are mostly variable definitions, use table format.
+    Otherwise, use prose format for cohort information.
+    
+    Args:
+        context_docs: List of retrieved documents
+    
+    Returns:
+        bool: True if table format should be used, False for prose
+    """
+    if not context_docs:
+        return False
+    
+    # Count variable definition documents
+    var_def_count = sum(1 for doc in context_docs if doc.metadata.get("type") == "variable_definitions")
+    ratio = var_def_count / len(context_docs)
+    
+    # Use table format if >60% of context is variable definitions
+    return ratio > 0.6
 
 # ── Main App ──────────────────────────────────────────────────────────────────
 
 st.title("💬 NEAR Metadata Chatbot")
-st.markdown(f"Ask natural questions about NEAR metadata! (Environment: **{DEPLOYMENT_ENV.upper()}**)")
 
 # Display which database is being used
 if DEPLOYMENT_ENV.lower() == "production":
@@ -160,18 +305,11 @@ if DEPLOYMENT_ENV.lower() == "production":
 else:
     st.info("🖥️ Using **Demo** vector database")
 
-if "vectorstore_initialized" not in st.session_state:
-    vectorstore = load_vectorstore()
-    st.session_state.vectorstore = vectorstore
-    st.session_state.vectorstore_initialized = True
-else:
-    vectorstore = st.session_state.vectorstore
-
-if vectorstore is None:
-    st.error(f"❌ Vector database not found at {ACTIVE_CHROMA_DIR}")
+if st.session_state.vectorstore is None:
+    st.error(f"❌ Database not loaded. Please select a database in the sidebar.")
     st.stop()
 else:
-    st.success(f"✓ Vector store loaded with {vectorstore._collection.count()} items. Ready to chat!")
+    st.success(f"✓ Vector store loaded for {st.session_state.selected_database}. Ready to chat!")
 
 # Display search suggestions
 st.markdown("### 💡 Try asking about...")
@@ -181,7 +319,7 @@ with col1:
     st.caption("- Sleep quality measurements")
     st.caption("- Social engagement variables")
 with col2:
-    st.caption("- Tell me about the SNAC-K cohort")
+    st.caption("- Tell me about this database/cohort")
     st.caption("- Physical activity variables")
     st.caption("- Medication and treatment data")
 with col3:
@@ -215,12 +353,17 @@ if prompt := st.chat_input("Ask about your metadata..."):
                     temperature=0.1,
                 )
                 
-                # Determine question type
-                is_var_question = is_variable_question(prompt)
-                # Retrieve relevant cohort background based on user's prompt
-                cohort_background = get_database_description(prompt, vectorstore)
+                # Retrieve relevant cohort background
+                cohort_background = get_database_description(vectorstore)
                 
-                if is_var_question:
+                # Get context (already filtered to selected database via collection)
+                # Returns both context text and document list
+                context, context_docs = filter_and_organize_context(prompt, vectorstore)
+                
+                # Intelligently decide format based on retrieved content
+                use_table_format = should_use_table_format(context_docs)
+
+                if use_table_format:
                     # Variable-specific prompt with tables
                     prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata.
 
@@ -248,11 +391,14 @@ if prompt := st.chat_input("Ask about your metadata..."):
                     |---|---|---|
                     | variable_name | What it measures in plain English | Category values if applicable |
                     
-                    CRITICAL RULES:
-                    - Column 1: MUST show the raw variable NAME/ID (e.g., löpnr, kön)
-                    - Column 2: MUST show what the variable measures in plain English
-                    - Column 3: MUST show category values (e.g., "1=man, 2=woman" or "N/A" if no categories)
-                    - NEVER invent variable names - only use variable names mentioned in the context
+                    CRITICAL RULES FOR EXTRACTING VARIABLE NAMES:
+                    - Column 1: EXTRACT EXACTLY the text that appears after "Variable: " in the source data
+                    - Do NOT use any other field names, labels, or descriptions
+                    - Do NOT use text from fields like "Description:" or "Sociodemographic Economic Characteristics:"
+                    - EXAMPLE: If you see "Variable: age_HT_rounded", MUST write "age_HT_rounded" in Column 1
+                    - EXAMPLE: If you see "Variable: löpnr", MUST write "löpnr" in Column 1
+                    - NEVER modify, shorten, or translate the variable name
+                    - NEVER invent variable names - only extract exactly what follows "Variable: "
                     
                     IMPORTANT NOTE ON VARIABLE AVAILABILITY:
                     For information about which cohorts and tables contain these variables, please refer to the Maelstrom catalogue at: https://www.maelstrom-research.org/
@@ -274,9 +420,6 @@ if prompt := st.chat_input("Ask about your metadata..."):
                         template=prompt_template, 
                         input_variables=["cohort_background", "context", "question"]
                     )
-
-                    # Get context (only variable definitions for efficiency)
-                    context = filter_and_organize_context(prompt, vectorstore)
 
                     rag_chain = (
                         {
@@ -330,9 +473,16 @@ if prompt := st.chat_input("Ask about your metadata..."):
                         st.error(f"Error: {str(e)}")
                         response = ""
 
-        st.markdown(response)
+        # Prepend database hint to response
+        selected_db = st.session_state.get("selected_database")
+        if selected_db and response:
+            response_with_hint = f"📍**The answer is based on: {selected_db}**\n\n{response}"
+        else:
+            response_with_hint = response
+        
+        st.markdown(response_with_hint)
 
-    st.session_state.messages.append({"role": "assistant", "content": response})
+    st.session_state.messages.append({"role": "assistant", "content": response_with_hint})
 
 if st.button("Clear Chat"):
     st.session_state.messages = []

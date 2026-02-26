@@ -7,10 +7,10 @@ print("=" * 60)
 print("Testing XML Parser")
 print("=" * 60)
 
-xml_file_path = "./data/SNAC-K/SNAC-K_Cohort1_Baseline.xml"
+xml_file_path = "./data/Betula/Betula_T2.xml"
 
 if os.path.exists(xml_file_path):
-    doc = parse_xml_to_document(xml_file_path, database_name="SNAC-K")
+    doc = parse_xml_to_document(xml_file_path, database_name="Betula")
     print("Document Metadata:")
     print(f"  Source: {doc.metadata['source']}")
     print(f"  Database: {doc.metadata['database']}")
@@ -26,10 +26,10 @@ print("\n" + "=" * 60)
 print("Testing JSON Parser")
 print("=" * 60)
 
-json_file_path = "./data/SNAC-K/snac-k.json"
+json_file_path = "./data/Betula/betula.json"
 
 if os.path.exists(json_file_path):
-    doc = parse_json_to_document(json_file_path, database_name="SNAC-K")
+    doc = parse_json_to_document(json_file_path, database_name="Betula")
     print("Document Metadata:")
     print(f"  Source: {doc.metadata['source']}")
     print(f"  Database: {doc.metadata['database']}")

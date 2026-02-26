@@ -9,20 +9,33 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from xml_parser import parse_xml_to_document
 from json_parser import parse_json_to_document
-from database_utils import get_available_databases
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 CHROMA_DEMO_DB = "./chroma_demo_db"      # Small demo database (push to GitHub)
 CHROMA_PROD_DB = "./chroma_prod_db"      # Large production database (use cloud storage)
 DATA_ROOT = "./data"
-TRAIN_MODE = "specific"  # "specific" or "all"
+TRAIN_MODE = "all"  # "specific" or "all"
 SELECTED_DATABASE = "SNAC-K"  # Only used if TRAIN_MODE == "specific"
 
 # Functions ─────────────────────────────────────────────────────────────────
 def get_embeddings():
     """Initialize embeddings model."""
     return HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
+
+def get_available_databases():
+    """Get list of available databases by scanning the data directory."""
+    if not os.path.exists(DATA_ROOT):
+        return []
+    
+    # Get subdirectories in DATA_ROOT (each subdirectory is a database)
+    databases = []
+    for item in os.listdir(DATA_ROOT):
+        item_path = os.path.join(DATA_ROOT, item)
+        if os.path.isdir(item_path):
+            databases.append(item)
+    
+    return sorted(databases)
 
 def process_database_to_vectorstore(data_dir: str, database_name: str = None):
     """Process XML and JSON files from the specified database directory and create vector store."""
@@ -137,29 +150,37 @@ if __name__ == "__main__":
         else:
             print("Cancelled. Existing vector store will be overwritten.")
     
-    # Train vector store
+    # Train vector store (separate collection for each database)
     try:
-        all_chunks = []
+        embeddings = get_embeddings()
+        print(f"\nCreating embeddings and storing in {env_name} database...")
+        print(f"Each database will have its own collection.\n")
+        
+        total_items = 0
         
         for db in selected_databases:
             data_dir = os.path.join(DATA_ROOT, db)
             chunks = process_database_to_vectorstore(data_dir, database_name=db)
-            all_chunks.extend(chunks)
-        
-        print(f"\nTotal chunks to embed: {len(all_chunks)}")
-        
-        print(f"Creating embeddings and storing in {env_name} database...")
-        embeddings = get_embeddings()
-        vectorstore = Chroma.from_documents(
-            documents=all_chunks,
-            embedding=embeddings,
-            persist_directory=target_db,
-            collection_name="xml_metadata"
-        )
+            
+            # Create a separate collection for each database
+            collection_name = f"{db.lower()}_metadata"
+            print(f"\n  Creating collection: {collection_name} with {len(chunks)} chunks...")
+            
+            vectorstore = Chroma.from_documents(
+                documents=chunks,
+                embedding=embeddings,
+                persist_directory=target_db,
+                collection_name=collection_name
+            )
+            
+            items_count = vectorstore._collection.count()
+            print(f"    ✓ Collection '{collection_name}' created with {items_count} items")
+            total_items += items_count
         
         print(f"\n✓ {env_name} training complete!")
-        print(f"Vector store created with {vectorstore._collection.count()} items")
+        print(f"Total items across all collections: {total_items}")
         print(f"Vector store saved to: {os.path.abspath(target_db)}")
+        print(f"Collections created: {', '.join([f'{db.lower()}_metadata' for db in selected_databases])}")
         
         if env_choice == "1":
             print("\n💡 Next step: Push chroma_demo_db to GitHub")
