@@ -6,7 +6,6 @@ import tempfile
 import streamlit as st
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
-import chromadb
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from langchain_groq import ChatGroq  
@@ -162,15 +161,6 @@ def load_vectorstore(database_name: str):
             st.error(f"Error loading vector store for {database_name}: {e}")
     
     return None
-
-def get_all_collections():
-    """List all collections in the Chroma database for debugging."""
-    try:
-        client = chromadb.PersistentClient(path=ACTIVE_CHROMA_DIR)
-        collections = client.list_collections()
-        return [c.name for c in collections]
-    except Exception as e:
-        return [f"Error listing collections: {str(e)}"]
 
 # Known databases (in case data/ folder not available)
 def get_available_databases():
@@ -415,26 +405,6 @@ if DEPLOYMENT_ENV.lower() == "production":
     st.info("🛠️ Using **Production** vector database")
 else:
     st.info("🖥️ Using **Demo** vector database")
-
-# Debug info (remove in production)
-with st.expander("🔧 Debug Info"):
-    st.write(f"**DEPLOYMENT_ENV:** {DEPLOYMENT_ENV}")
-    st.write(f"**ACTIVE_CHROMA_DIR:** {ACTIVE_CHROMA_DIR}")
-    st.write(f"**Current Working Dir:** {os.getcwd()}")
-    st.write(f"**CHROMA_DIR Exists:** {os.path.exists(ACTIVE_CHROMA_DIR)}")
-    
-    if os.path.exists(ACTIVE_CHROMA_DIR):
-        contents = os.listdir(ACTIVE_CHROMA_DIR)
-        st.write(f"**CHROMA_DIR Contents:** {contents}")
-        
-        # List actual collections in the database
-        actual_collections = get_all_collections()
-        st.write(f"**Actual Collections in DB:** {actual_collections}")
-    
-    st.write(f"**Available Databases:** {st.session_state.available_databases}")
-    st.write(f"**Selected Database:** {st.session_state.selected_database}")
-    st.write(f"**Cache Keys:** {list(st.session_state.vectorstores_cache.keys())}")
-    st.write(f"**Vectorstore Loaded:** {st.session_state.vectorstore is not None}")
 
 if st.session_state.vectorstore is None:
     if not st.session_state.available_databases:
