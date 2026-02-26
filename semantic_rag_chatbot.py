@@ -170,7 +170,9 @@ def get_available_databases():
     databases = []
     
     try:
+        # Check if the Chroma directory exists
         if not os.path.exists(ACTIVE_CHROMA_DIR):
+            st.warning(f"⚠️ Chroma directory not found: {ACTIVE_CHROMA_DIR}")
             return []
         
         embeddings = get_embeddings()
@@ -187,7 +189,7 @@ def get_available_databases():
                 # If collection has documents, it's available
                 if vectorstore._collection.count() > 0:
                     databases.append(db_name)
-            except:
+            except Exception as e:
                 # Collection doesn't exist, skip it
                 pass
         
@@ -397,6 +399,13 @@ else:
 with st.expander("🔧 Debug Info"):
     st.write(f"**DEPLOYMENT_ENV:** {DEPLOYMENT_ENV}")
     st.write(f"**ACTIVE_CHROMA_DIR:** {ACTIVE_CHROMA_DIR}")
+    st.write(f"**Current Working Dir:** {os.getcwd()}")
+    st.write(f"**CHROMA_DIR Exists:** {os.path.exists(ACTIVE_CHROMA_DIR)}")
+    
+    if os.path.exists(ACTIVE_CHROMA_DIR):
+        contents = os.listdir(ACTIVE_CHROMA_DIR)
+        st.write(f"**CHROMA_DIR Contents:** {contents}")
+    
     st.write(f"**Available Databases:** {st.session_state.available_databases}")
     st.write(f"**Selected Database:** {st.session_state.selected_database}")
     st.write(f"**Cache Keys:** {list(st.session_state.vectorstores_cache.keys())}")
