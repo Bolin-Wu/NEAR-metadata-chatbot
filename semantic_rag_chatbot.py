@@ -1,6 +1,7 @@
 import os
 import sys
 from pathlib import Path
+import tempfile
 
 import streamlit as st
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -85,7 +86,9 @@ def initialize_production_db():
     Only runs once per session.
     
     Setup:
-    1. Zip your chroma_prod_db folder: zip -r chroma_prod_db.zip chroma_prod_db/
+    1. Create the correct zip file:
+       cd chroma_prod_db & zip -r ../chroma_prod_db.zip . & cd ..
+       (This creates a zip with the database contents directly, not nested)
     2. Create a GitHub release in your repo
     3. Upload chroma_prod_db.zip as a release asset
     4. Copy the download link: https://github.com/user/repo/releases/download/v1.0/chroma_prod_db.zip
@@ -134,13 +137,33 @@ def initialize_production_db():
                         if int(progress * 10) % 1 == 0:
                             st.info(f"📥 Downloaded {downloaded / (1024*1024):.1f} MB...")
         
-        # Extract to chroma_prod_db
+        # Extract to temp directory first (zip contains 'chroma_prod_db/' folder)
         st.info("📦 Extracting database...")
-        with zipfile.ZipFile(zip_path, "r") as zip_ref:
-            zip_ref.extractall(CHROMA_PROD_DB)
+        temp_dir = tempfile.mkdtemp()
+        
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                zip_ref.extractall(temp_dir)
+            
+            # The zip file contains 'chroma_prod_db/' as the top-level folder
+            extracted_db = os.path.join(temp_dir, "chroma_prod_db")
+            
+            if os.path.exists(extracted_db):
+                # Remove old chroma_prod_db directory if it exists
+                if os.path.exists(CHROMA_PROD_DB):
+                    shutil.rmtree(CHROMA_PROD_DB)
+                
+                # Move extracted directory to final location
+                shutil.move(extracted_db, CHROMA_PROD_DB)
+                st.success("✅ Production database downloaded and ready!")
+            else:
+                st.error("❌ Extracted data structure was unexpected. Try recreating the zip file.")
+        finally:
+            # Clean up temporary directory
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
         
         os.remove(zip_path)
-        st.success("✅ Production database downloaded and ready!")
         
     except requests.exceptions.Timeout:
         st.error("❌ Download timeout. The database file may be too large. Using local production database.")
