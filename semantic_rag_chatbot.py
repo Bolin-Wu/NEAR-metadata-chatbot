@@ -138,8 +138,8 @@ def initialize_production_db():
         response = requests.get(CHROMA_PROD_DB_URL, timeout=120, stream=True)
         response.raise_for_status()
         
-        # Save the zip file
-        zip_path = f"{CHROMA_PROD_DB}/temp.zip"
+        # Save the zip file to a temporary location
+        zip_path = os.path.join(tempfile.gettempdir(), "chroma_prod_db.zip")
         total_size = int(response.headers.get('content-length', 0))
         
         with open(zip_path, "wb") as f:
@@ -179,8 +179,9 @@ def initialize_production_db():
             # Clean up temporary directory
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
-        
-        os.remove(zip_path)
+            # Clean up zip file
+            if os.path.exists(zip_path):
+                os.remove(zip_path)
         
     except requests.exceptions.Timeout:
         st.error("❌ Download timeout. The database file may be too large. Using local production database.")
