@@ -128,7 +128,8 @@ def initialize_production_db():
         return
     
     try:
-        st.info("📥 Downloading production database from GitHub Releases...")
+        progress_placeholder = st.empty()
+        progress_placeholder.info("📥 Downloading production database from GitHub Releases...")
         
         # Create directory if it doesn't exist
         os.makedirs(CHROMA_PROD_DB, exist_ok=True)
@@ -147,15 +148,14 @@ def initialize_production_db():
                 if chunk:
                     f.write(chunk)
                     downloaded += len(chunk)
-                    # Show progress
+                    # Update progress (no intermediate messages, just update the same one)
                     if total_size > 0:
                         progress = min(downloaded / total_size, 1.0)
-                        # Only log every 10%
                         if int(progress * 10) % 1 == 0:
-                            st.info(f"📥 Downloaded {downloaded / (1024*1024):.1f} MB...")
+                            progress_placeholder.info(f"📥 Downloaded {downloaded / (1024*1024):.1f} MB...")
         
         # Extract to temp directory first (zip contains 'chroma_prod_db/' folder)
-        st.info("📦 Extracting database...")
+        progress_placeholder.info("📦 Extracting database...")
         temp_dir = tempfile.mkdtemp()
         
         try:
@@ -172,9 +172,9 @@ def initialize_production_db():
                 
                 # Move extracted directory to final location
                 shutil.move(extracted_db, CHROMA_PROD_DB)
-                st.success("✅ Production database downloaded and ready!")
+                progress_placeholder.success("✅ Production database downloaded and ready!")
             else:
-                st.error("❌ Extracted data structure was unexpected. Try recreating the zip file.")
+                progress_placeholder.error("❌ Extracted data structure was unexpected. Try recreating the zip file.")
         finally:
             # Clean up temporary directory
             if os.path.exists(temp_dir):
