@@ -50,26 +50,6 @@ def parse_xml_to_text(file_path: str) -> str:
             
             text += "\n"
         
-        elif element.tag == 'entity':
-            name = element.get('name', 'unknown')
-            
-            text += f"{prefix}Entity: {name}\n"
-            
-            # Extract attributes directly
-            attributes_elem = element.find('attributes')
-            if attributes_elem is not None:
-                for attr in attributes_elem.findall('attribute'):
-                    attr_name = attr.get('name', 'unknown')
-                    if attr_name not in skip_attrs:
-                        attr_value = attr.text or 'N/A'
-                        display_name = attr_name.replace('_', ' ').title()
-                        text += f"{prefix}  {display_name}: {attr_value}\n"
-            
-            text += "\n"
-        
-        else:
-            # Skip non-variable/entity root elements or recurse if needed
-            pass
         
         for child in element:
             extract_element_text(child, indent)
