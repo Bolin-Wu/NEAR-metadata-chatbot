@@ -235,7 +235,7 @@ def get_available_databases():
     Works even if ./data folder is not present (e.g., on Streamlit Cloud).
     """
     databases = []
-    errors = []
+    collection_status = {}
     
     try:
         # Check if the Chroma directory exists
@@ -255,19 +255,20 @@ def get_available_databases():
                     collection_name=collection_name
                 )
                 count = vectorstore._collection.count()
+                collection_status[db_name] = count
                 if count > 0:
                     databases.append(db_name)
-                else:
-                    errors.append(f"{db_name}: 0 documents in collection")
             except Exception as e:
-                # Collection doesn't exist, skip it
-                errors.append(f"{db_name}: {str(e)}")
+                collection_status[db_name] = f"Error: {str(e)}"
         
-        # If no databases found, show debug info
-        if not databases and errors:
-            with st.expander("🔍 Collection Loading Errors"):
-                for error in errors:
-                    st.caption(error)
+        # Show collection status
+        with st.expander("📊 Collection Status"):
+            for db_name, status in collection_status.items():
+                if isinstance(status, int):
+                    icon = "✓" if status > 0 else "✗"
+                    st.write(f"{icon} **{db_name}:** {status} documents")
+                else:
+                    st.write(f"❌ **{db_name}:** {status}")
         
         return sorted(databases)
     except Exception as e:
