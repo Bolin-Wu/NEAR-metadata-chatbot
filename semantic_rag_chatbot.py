@@ -377,9 +377,9 @@ if DEPLOYMENT_ENV.lower() == "production":
 
 # Display which database is being used
 if DEPLOYMENT_ENV.lower() == "production":
-    st.info("🛠️ Using **Production** vector database")
+    st.info("🛠️ **Production** mode")
 else:
-    st.info("🖥️ Using **Demo** vector database")
+    st.info("🖥️ **Demo** mode")
 
 if st.session_state.vectorstore is None:
     if not st.session_state.available_databases:
