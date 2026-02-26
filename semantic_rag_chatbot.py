@@ -94,8 +94,25 @@ def initialize_production_db():
     4. Copy the download link: https://github.com/user/repo/releases/download/v1.0/chroma_prod_db.zip
     5. Add to .streamlit/secrets.toml: CHROMA_PROD_DB_URL = "https://..."
     """
+    # Check if local copy exists and is valid
+    needs_download = False
+    
     if os.path.exists(CHROMA_PROD_DB) and os.listdir(CHROMA_PROD_DB):
-        return  # Already have local copy
+        # Check if it has the wrong structure (nested chroma_prod_db folder)
+        contents = os.listdir(CHROMA_PROD_DB)
+        if "chroma_prod_db" in contents:
+            # Old broken extraction - delete and re-download
+            st.warning("🔄 Detected old extraction format. Re-downloading database...")
+            shutil.rmtree(CHROMA_PROD_DB)
+            needs_download = True
+        else:
+            # Has the correct structure
+            return
+    else:
+        needs_download = True
+    
+    if not needs_download:
+        return
     
     if not CHROMA_PROD_DB_URL:
         st.warning(
