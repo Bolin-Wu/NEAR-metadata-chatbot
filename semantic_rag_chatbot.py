@@ -6,6 +6,7 @@ import tempfile
 import streamlit as st
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
+import chromadb
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from langchain_groq import ChatGroq  
@@ -218,6 +219,15 @@ def load_vectorstore(database_name: str):
     
     return None
 
+def get_all_collections():
+    """List all collections in the Chroma database for debugging."""
+    try:
+        client = chromadb.PersistentClient(path=ACTIVE_CHROMA_DIR)
+        collections = client.list_collections()
+        return [c.name for c in collections]
+    except Exception as e:
+        return [f"Error listing collections: {str(e)}"]
+
 # Known databases (in case data/ folder not available)
 def get_available_databases():
     """Get list of available databases by querying Chroma collections.
@@ -225,6 +235,7 @@ def get_available_databases():
     Works even if ./data folder is not present (e.g., on Streamlit Cloud).
     """
     databases = []
+    errors = []
     
     try:
         # Check if the Chroma directory exists
@@ -243,12 +254,20 @@ def get_available_databases():
                     embedding_function=embeddings,
                     collection_name=collection_name
                 )
-                # If collection has documents, it's available
-                if vectorstore._collection.count() > 0:
+                count = vectorstore._collection.count()
+                if count > 0:
                     databases.append(db_name)
+                else:
+                    errors.append(f"{db_name}: 0 documents in collection")
             except Exception as e:
                 # Collection doesn't exist, skip it
-                pass
+                errors.append(f"{db_name}: {str(e)}")
+        
+        # If no databases found, show debug info
+        if not databases and errors:
+            with st.expander("🔍 Collection Loading Errors"):
+                for error in errors:
+                    st.caption(error)
         
         return sorted(databases)
     except Exception as e:
@@ -462,6 +481,10 @@ with st.expander("🔧 Debug Info"):
     if os.path.exists(ACTIVE_CHROMA_DIR):
         contents = os.listdir(ACTIVE_CHROMA_DIR)
         st.write(f"**CHROMA_DIR Contents:** {contents}")
+        
+        # List actual collections in the database
+        actual_collections = get_all_collections()
+        st.write(f"**Actual Collections in DB:** {actual_collections}")
     
     st.write(f"**Available Databases:** {st.session_state.available_databases}")
     st.write(f"**Selected Database:** {st.session_state.selected_database}")
