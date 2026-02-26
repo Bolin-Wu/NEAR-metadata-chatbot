@@ -370,20 +370,20 @@ else:
     st.success(f"✓ Vector store loaded for {st.session_state.selected_database}. Ready to chat!")
 
 # Display search suggestions
-st.markdown("### 💡 Try asking about...")
+st.markdown("### 💡 Example prompts:")
 col1, col2, col3 = st.columns(3)
 with col1:
-    st.caption("- Cognitive assessment variables")
-    st.caption("- Sleep quality measurements")
-    st.caption("- Social engagement variables")
+    st.caption("- What cognitive tests are included?")
+    st.caption("- How is sleep measured?")
+    st.caption("- What social engagement data do you have?")
 with col2:
-    st.caption("- Tell me about this database/cohort")
-    st.caption("- Physical activity variables")
-    st.caption("- Medication and treatment data")
+    st.caption("- Tell me about this cohort")
+    st.caption("- What physical activity data is there?")
+    st.caption("- Are there medication records?")
 with col3:
-    st.caption("- Mental health assessment variables")
-    st.caption("- Nutrition and diet variables")
-    st.caption("- Biomarker measurements")
+    st.caption("- How do you assess mental health?")
+    st.caption("- What nutrition data is available?")
+    st.caption("- What biomarkers were measured?")
 
 # ── Chat ──────────────────────────────────────────────────────────────────────
 if "messages" not in st.session_state:
