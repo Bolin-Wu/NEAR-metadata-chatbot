@@ -179,15 +179,6 @@ def get_available_databases():
             except Exception as e:
                 collection_status[db_name] = f"Error: {str(e)}"
         
-        # Show collection status
-        with st.expander("📊 Collection Status"):
-            for db_name, status in collection_status.items():
-                if isinstance(status, int):
-                    icon = "✓" if status > 0 else "✗"
-                    st.write(f"{icon} **{db_name}:** {status} documents")
-                else:
-                    st.write(f"❌ **{db_name}:** {status}")
-        
         return sorted(databases)
     except Exception as e:
         st.warning(f"Could not retrieve available databases: {e}")
