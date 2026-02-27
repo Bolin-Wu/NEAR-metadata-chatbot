@@ -422,7 +422,7 @@ if prompt := st.chat_input(placeholder_text):
                     - Then, present the variable information in a markdown table as specified below:
 
                     TABLE - Variables by Content (what they measure):
-                    | Raw Variable Name | Label | Categories |
+                    | Variable Name | Label | Categories |
                     |---|---|---|
                     | variable_name | What it measures in plain English | Category values if applicable |
                     
@@ -441,7 +441,7 @@ if prompt := st.chat_input(placeholder_text):
                     EXAMPLE OF CORRECT FORMAT:
                     "In SNAC-K, several variables measure basic demographics. Participants are identified by a unique proband number (löpnr). The cohort includes both men and women, tracked through a sex variable. Birth dates are recorded to calculate age.
 
-                    | Raw Variable Name | Label | Categories |
+                    | Variable Name | Label | Categories |
                     |---|---|---|
                     | löpnr | Unique participant identifier | N/A (unique ID) |
                     | kön | Participant's biological sex | 1=man, 2=woman |
