@@ -112,27 +112,6 @@ def initialize_production_db():
 def get_embeddings():
     return HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
 
-def load_vectorstore(database_name: str):
-    """Load vector store for a specific database from disk.
-    
-    Args:
-        database_name: Name of the database (e.g., 'Betula', 'SNAC-K')
-    """
-    if os.path.exists(CHROMA_DB):
-        try:
-            embeddings = get_embeddings()
-            collection_name = f"{database_name.lower()}_metadata"
-            vectorstore = Chroma(
-                persist_directory=CHROMA_DB,
-                embedding_function=embeddings,
-                collection_name=collection_name
-            )
-            if vectorstore._collection.count() > 0:
-                return vectorstore
-        except Exception as e:
-            st.error(f"Error loading vector store for {database_name}: {e}")
-    
-    return None
 
 # Known databases (in case data/ folder not available)
 def get_available_databases():
@@ -240,19 +219,22 @@ with st.sidebar:
     
     st.markdown("---")
     
+    # Contact & Support
+    st.subheader("Contact & Support")
+    st.markdown("""
+    **Maintainer:** Bolin Wu (NEAR)
+    
+    [📧 bolin.wu@ki.se](mailto:bolin.wu@ki.se)
+    """)
+    
+    st.markdown("---")
+    
     # Coming Soon / Roadmap
-    with st.expander("🚀 Coming Soon"):
+    with st.expander("🚀 Feature Coming Soon"):
         st.markdown("""
-        New features under development:
-        
         - **Multi-Database Search**: Query across multiple databases
         - **Export Results**: Download as CSV/Excel
         - **Search History**: Track previous searches
-        
-        If you have suggestions or want to contribute, please reach out!
-        
-        Maintainer: Bolin Wu (NEAR)
-        📧 [bolin.wu@ki.se](mailto:bolin.wu@ki.se)
         """)
 
 def get_database_description(vectorstore):
@@ -280,19 +262,6 @@ def get_database_description(vectorstore):
     except Exception as e:
         st.warning(f"Could not retrieve database description: {e}")
         return ""
-
-def is_variable_question(question):
-    """Determine if the question is about specific variables or general cohort info."""
-    variable_keywords = [
-        "variable", "variables","field", "column", "measure", "data", "table", 
-        "available in", "which variables",
-        "categories", "values", "definition", "how to find",
-        "named", "called", "list of", "question", "questions",
-        "raw variable name", "labels", "source"
-    ]
-    
-    question_lower = question.lower()
-    return any(keyword in question_lower for keyword in variable_keywords)
 
 def filter_and_organize_context(query, vectorstore):
     """Retrieve and organize context - only variable definitions.
@@ -367,7 +336,14 @@ if st.session_state.vectorstore is None:
         st.error(f"❌ Database not loaded. Please select a database in the sidebar.")
     st.stop()
 else:
-    st.success(f"✓ Vector store loaded for {st.session_state.selected_database}. Ready to chat!")
+    st.success(f"✓ {st.session_state.selected_database} loaded. Ready to chat!")
+
+# Add disclaimer about reference information
+st.info("""
+**ℹ️ Disclaimer:** The information provided here is for reference purposes only. 
+For more accurate and comprehensive metadata, please check with [Maelstrom catalogue](https://www.maelstrom-research.org/search#lists?type=studies&query=network(in(Mica_network.id,near)),variable(limit(0,20)),study(in(Mica_study.className,Study),limit(0,20))) 
+or the NEAR team.
+""")
 
 # Display search suggestions
 st.markdown("### 💡 Example prompts:")
@@ -471,7 +447,6 @@ if prompt := st.chat_input(placeholder_text):
                     | kön | Participant's biological sex | 1=man, 2=woman |
                     | Birthday | Date of birth for age calculation | Date format |
                     
-                    For detailed information on where these variables are available across different cohort studies, please check the Maelstrom catalogue."
 
                     Answer:"""
 
