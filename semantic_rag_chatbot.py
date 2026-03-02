@@ -42,7 +42,6 @@ except (FileNotFoundError, KeyError, AttributeError):
 
 # Cloud storage URL for production vector database (optional)
 # Use HuggingFace Hub: huggingface_hub.download() with repo_id
-# Example: hf_download('your-username/near-chroma-db', 'chroma_prod_db.zip')
 try:
     HUGGINGFACE_REPO_ID = st.secrets.get("HUGGINGFACE_REPO_ID")
 except:
@@ -50,20 +49,13 @@ except:
 
 # ── Functions ─────────────────────────────────────────────────────────────────
 def initialize_production_db():
-    """Download production database from HuggingFace Hub if not present locally.
-    
-    Setup:
-    1. Push chroma_prod_db to HuggingFace Hub:
-       huggingface-cli repo create near-chroma-prod-db --type dataset
-       huggingface-cli upload near-chroma-prod-db ./chroma_prod_db chroma_prod_db
-    2. Set environment variable or secret:
-       HUGGINGFACE_REPO_ID = "your-username/near-chroma-prod-db"
-    """
+    """Download production database from HuggingFace Hub if not present locally."""
+    # Check if database already exists and is populated
     if os.path.exists(CHROMA_DB) and os.listdir(CHROMA_DB):
         return  # Already have local copy
     
     if not HUGGINGFACE_REPO_ID:
-        st.error("❌ HUGGINGFACE_REPO_ID not configured. Cannot load production database.")
+        st.error("❌ HUGGINGFACE_REPO_ID not configured. Set it in Streamlit secrets or environment variables.")
         st.stop()
     
     try:
@@ -76,7 +68,8 @@ def initialize_production_db():
         zip_path = hf_hub_download(
             repo_id=HUGGINGFACE_REPO_ID,
             filename="chroma_prod_db.zip",
-            repo_type="dataset"
+            repo_type="dataset",
+            cache_dir=Path.home() / ".cache" / "huggingface"
         )
         
         # Extract to temp directory
@@ -95,7 +88,7 @@ def initialize_production_db():
                 shutil.move(extracted_db, CHROMA_DB)
                 progress_placeholder.success("✅ Database downloaded and ready!")
             else:
-                progress_placeholder.error("❌ Extracted data structure unexpected. Stopping.")
+                progress_placeholder.error("❌ Extracted data structure unexpected.")
                 st.stop()
         finally:
             if os.path.exists(temp_dir):
