@@ -52,13 +52,10 @@ def initialize_production_db():
     """Download production database from HuggingFace Hub if not present locally."""
     # Check if database already exists and is populated
     if os.path.exists(CHROMA_DB) and os.listdir(CHROMA_DB):
-        st.info(f"✓ Using cached database at {CHROMA_DB}")
         return  # Already have local copy
     
-    st.warning(f"Database not found at {CHROMA_DB}. Repo ID: {HUGGINGFACE_REPO_ID}")
-    
     if not HUGGINGFACE_REPO_ID:
-        st.error("❌ HUGGINGFACE_REPO_ID not configured.")
+        st.error("❌ HUGGINGFACE_REPO_ID not configured. Please contact the maintainer.")
         st.stop()
     
     try:
@@ -259,8 +256,6 @@ if "available_databases_loaded" not in st.session_state:
     with st.spinner("Discovering available databases..."):
         st.session_state.available_databases = get_available_databases()
         st.session_state.available_databases_loaded = True
-else:
-    pass
 
 # Preload all vectorstores in the background (cache them)
 if not st.session_state.vectorstores_loading and st.session_state.available_databases:
