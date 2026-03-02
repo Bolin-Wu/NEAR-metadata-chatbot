@@ -83,34 +83,18 @@ def initialize_production_db():
             with zipfile.ZipFile(zip_path, "r") as zip_ref:
                 zip_ref.extractall(temp_dir)
             
-            # Check what was extracted
-            extracted_contents = os.listdir(temp_dir)
-            progress_placeholder.info(f"📂 Extracted contents: {extracted_contents}")
+            # The zip contains the contents of chroma_prod_db directly
+            # (not wrapped in a chroma_prod_db folder)
+            if os.path.exists(CHROMA_DB):
+                shutil.rmtree(CHROMA_DB)
             
-            # Try to find chroma_prod_db directory (might be nested)
-            extracted_db = None
-            
-            # First, check if it's at root level
-            if "chroma_prod_db" in extracted_contents:
-                extracted_db = os.path.join(temp_dir, "chroma_prod_db")
-            else:
-                # Search subdirectories
-                for item in extracted_contents:
-                    item_path = os.path.join(temp_dir, item)
-                    if os.path.isdir(item_path):
-                        if "chroma_prod_db" in os.listdir(item_path):
-                            extracted_db = os.path.join(item_path, "chroma_prod_db")
-                            break
-            
-            if extracted_db and os.path.exists(extracted_db):
-                if os.path.exists(CHROMA_DB):
-                    shutil.rmtree(CHROMA_DB)
-                shutil.move(extracted_db, CHROMA_DB)
-                progress_placeholder.success("✅ Database downloaded and ready!")
-            else:
-                progress_placeholder.error(f"❌ chroma_prod_db not found. Extracted: {extracted_contents}")
-                st.error(f"Expected chroma_prod_db folder not found in HuggingFace zip. Contents: {extracted_contents}")
-                st.stop()
+            # Move extracted contents to CHROMA_DB
+            shutil.move(temp_dir, CHROMA_DB)
+            progress_placeholder.success("✅ Database downloaded and ready!")
+        except Exception as e:
+            progress_placeholder.error(f"❌ Failed to extract: {e}")
+            st.error(f"Failed to extract database: {e}")
+            st.stop()
         finally:
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
