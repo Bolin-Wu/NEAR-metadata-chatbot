@@ -145,93 +145,15 @@ def get_available_databases():
         st.warning(f"Could not retrieve available databases: {e}")
         return []
 
-# Initialize available databases (before sidebar)
-if "available_databases_loaded" not in st.session_state:
-    with st.spinner("Discovering available databases..."):
-        st.session_state.available_databases = get_available_databases()
-        st.session_state.available_databases_loaded = True
-else:
-    pass
-
-# Initialize vectorstores cache (preload all databases on first access)
-if "vectorstores_cache" not in st.session_state:
-    st.session_state.vectorstores_cache = {}
-    st.session_state.vectorstores_loading = False
-
-# Preload all vectorstores in the background (cache them)
-if not st.session_state.vectorstores_loading and st.session_state.available_databases:
-    if len(st.session_state.vectorstores_cache) == 0:
-        st.session_state.vectorstores_loading = True
-        with st.spinner("Preloading vector stores..."):
-            embeddings = get_embeddings()
-            for db in st.session_state.available_databases:
-                try:
-                    collection_name = f"{db.lower()}_metadata"
-                    vectorstore = Chroma(
-                        persist_directory=CHROMA_DB,
-                        embedding_function=embeddings,
-                        collection_name=collection_name
-                    )
-                    if vectorstore._collection.count() > 0:
-                        st.session_state.vectorstores_cache[db] = vectorstore
-                except Exception as e:
-                    st.warning(f"Could not preload {db}: {e}")
-        st.session_state.vectorstores_loading = False
-
 # Initialize vectorstore as None (will be set from cache on database selection)
 if "vectorstore" not in st.session_state:
     st.session_state.vectorstore = None
     st.session_state.selected_database = None
 
-# Add logo and controls to sidebar
-with st.sidebar:
-    logo_path = Path("logo/NEAR-chatbot.jpg")
-    if logo_path.exists():
-        col1, col2, col3 = st.columns([0.5, 2.5, 0.5])
-        with col2:
-            st.image(str(logo_path), use_container_width=True)
-    st.markdown("---")
-    
-    # Database selection
-    st.subheader("Select Database")
-    if st.session_state.available_databases:
-        selected_database = st.radio(
-            "Choose a database to query:",
-            options=st.session_state.available_databases,
-            index=0,
-            key="database_radio"
-        )
-        
-        # Switch to selected database (from cache - instant!)
-        if selected_database != st.session_state.selected_database:
-            if selected_database in st.session_state.vectorstores_cache:
-                st.session_state.vectorstore = st.session_state.vectorstores_cache[selected_database]
-                st.session_state.selected_database = selected_database
-            else:
-                st.error(f"Vector store for {selected_database} not available")
-        
-    else:
-        st.warning("No databases available")
-    
-    st.markdown("---")
-    
-    # Contact & Support
-    st.subheader("Contact & Support")
-    st.markdown("""
-    **Maintainer:** Bolin Wu (NEAR)
-    
-    [📧 bolin.wu@ki.se](mailto:bolin.wu@ki.se)
-    """)
-    
-    st.markdown("---")
-    
-    # Coming Soon / Roadmap
-    with st.expander("🚀 Feature Coming Soon"):
-        st.markdown("""
-        - **Multi-Database Search**: Query across multiple databases
-        - **Export Results**: Download as CSV/Excel
-        - **Search History**: Track previous searches
-        """)
+# Initialize vectorstores cache (preload all databases on first access)
+if "vectorstores_cache" not in st.session_state:
+    st.session_state.vectorstores_cache = {}
+    st.session_state.vectorstores_loading = False
 
 def get_database_description(vectorstore):
     """Retrieve database description from the loaded vector store collection.
@@ -327,17 +249,86 @@ if not HUGGINGFACE_REPO_ID:
     st.error("❌ HUGGINGFACE_REPO_ID not configured in Streamlit secrets.")
     st.stop()
 
-# Initialize production database from cloud if needed (must be after st.set_page_config)
+# Initialize production database from cloud if needed (MUST BE FIRST!)
 initialize_production_db()
 
-if st.session_state.vectorstore is None:
-    if not st.session_state.available_databases:
-        st.error("❌ No databases available.")
-    else:
-        st.error(f"❌ Database not loaded. Please select a database in the sidebar.")
-    st.stop()
+# Initialize available databases (after database is ready)
+if "available_databases_loaded" not in st.session_state:
+    with st.spinner("Discovering available databases..."):
+        st.session_state.available_databases = get_available_databases()
+        st.session_state.available_databases_loaded = True
 else:
-    st.success(f"✓ {st.session_state.selected_database} loaded. Ready to chat!")
+    pass
+
+# Preload all vectorstores in the background (cache them)
+if not st.session_state.vectorstores_loading and st.session_state.available_databases:
+    if len(st.session_state.vectorstores_cache) == 0:
+        st.session_state.vectorstores_loading = True
+        with st.spinner("Preloading vector stores..."):
+            embeddings = get_embeddings()
+            for db in st.session_state.available_databases:
+                try:
+                    collection_name = f"{db.lower()}_metadata"
+                    vectorstore = Chroma(
+                        persist_directory=CHROMA_DB,
+                        embedding_function=embeddings,
+                        collection_name=collection_name
+                    )
+                    if vectorstore._collection.count() > 0:
+                        st.session_state.vectorstores_cache[db] = vectorstore
+                except Exception as e:
+                    st.warning(f"Could not preload {db}: {e}")
+        st.session_state.vectorstores_loading = False
+
+# Add logo and controls to sidebar
+with st.sidebar:
+    logo_path = Path("logo/NEAR-chatbot.jpg")
+    if logo_path.exists():
+        col1, col2, col3 = st.columns([0.5, 2.5, 0.5])
+        with col2:
+            st.image(str(logo_path), use_container_width=True)
+    st.markdown("---")
+    
+    # Database selection
+    st.subheader("Select Database")
+    if st.session_state.available_databases:
+        selected_database = st.radio(
+            "Choose a database to query:",
+            options=st.session_state.available_databases,
+            index=0,
+            key="database_radio"
+        )
+        
+        # Switch to selected database (from cache - instant!)
+        if selected_database != st.session_state.selected_database:
+            if selected_database in st.session_state.vectorstores_cache:
+                st.session_state.vectorstore = st.session_state.vectorstores_cache[selected_database]
+                st.session_state.selected_database = selected_database
+            else:
+                st.error(f"Vector store for {selected_database} not available")
+        
+    else:
+        st.warning("No databases available")
+    
+    st.markdown("---")
+    
+    # Contact & Support
+    st.subheader("Contact & Support")
+    st.markdown("""
+    **Maintainer:** Bolin Wu (NEAR)
+    
+    [📧 bolin.wu@ki.se](mailto:bolin.wu@ki.se)
+    """)
+    
+    st.markdown("---")
+    
+    # Coming Soon / Roadmap
+    with st.expander("🚀 Feature Coming Soon"):
+        st.markdown("""
+        - **Multi-Database Search**: Query across multiple databases
+        - **Export Results**: Download as CSV/Excel
+        - **Search History**: Track previous searches
+        """)
 
 # Add disclaimer about reference information
 st.info("""
