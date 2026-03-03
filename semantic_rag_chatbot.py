@@ -161,7 +161,7 @@ def export_tables_to_excel(tables_with_headers):
             worksheet = writer.sheets[sheet_name]
             
             # Header formatting
-            header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+            header_fill = PatternFill(start_color="FF7BA74F", end_color="FF7BA74F", fill_type="solid")
             header_font = Font(bold=True, color="FFFFFF")
             
             for cell in worksheet[1]:
