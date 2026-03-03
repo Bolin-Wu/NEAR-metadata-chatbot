@@ -2,8 +2,13 @@ import os
 import sys
 from pathlib import Path
 import tempfile
+import re
+from io import BytesIO
 
 import streamlit as st
+import pandas as pd
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.output_parsers import StrOutputParser
@@ -48,6 +53,152 @@ except:
     HUGGINGFACE_REPO_ID = os.getenv("HUGGINGFACE_REPO_ID")
 
 # ── Functions ─────────────────────────────────────────────────────────────────
+
+def extract_markdown_tables(text):
+    """Extract markdown tables from text, handling multiple tables with headers.
+    
+    Args:
+        text: String containing markdown tables
+    
+    Returns:
+        List of tuples: (table_header_text, DataFrame) for each table found
+    """
+    tables_with_headers = []
+    
+    # Split by table blocks - look for patterns of | ... |
+    # Markdown tables are identified by lines starting with |
+    lines = text.split('\n')
+    current_table = []
+    last_header = None
+    
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        
+        # Look for a header line - text that comes before a table
+        if line and not line.startswith('|') and i + 1 < len(lines):
+            next_line = lines[i + 1].strip()
+            # Check if next line starts a table
+            if next_line.startswith('|'):
+                last_header = line
+        
+        # Check if this line is part of a table
+        if line.startswith('|') and line.endswith('|'):
+            current_table.append(line)
+        else:
+            # End of current table
+            if current_table:
+                # Parse the accumulated table lines
+                df = _parse_markdown_table(current_table)
+                if df is not None and not df.empty:
+                    tables_with_headers.append((last_header or f"Table {len(tables_with_headers) + 1}", df))
+                current_table = []
+        
+        i += 1
+    
+    # Don't forget the last table
+    if current_table:
+        df = _parse_markdown_table(current_table)
+        if df is not None and not df.empty:
+            tables_with_headers.append((last_header or f"Table {len(tables_with_headers) + 1}", df))
+    
+    return tables_with_headers
+
+
+def _parse_markdown_table(table_lines):
+    """Parse a list of markdown table lines into a DataFrame.
+    
+    Args:
+        table_lines: List of markdown table lines (| col1 | col2 | ...)
+    
+    Returns:
+        pandas DataFrame or None if invalid
+    """
+    if len(table_lines) < 2:
+        return None
+    
+    try:
+        # Parse header
+        header_line = table_lines[0]
+        headers = [cell.strip() for cell in header_line.split('|')[1:-1]]
+        
+        # Skip separator line (contains dashes)
+        rows = []
+        for line in table_lines[2:]:
+            cells = [cell.strip() for cell in line.split('|')[1:-1]]
+            if len(cells) == len(headers):
+                rows.append(cells)
+        
+        if not rows:
+            return None
+        
+        return pd.DataFrame(rows, columns=headers)
+    except Exception as e:
+        return None
+
+
+def export_tables_to_excel(tables_with_headers):
+    """Export multiple DataFrames to Excel file with formatted sheets.
+    
+    Args:
+        tables_with_headers: List of (header_text, DataFrame) tuples
+    
+    Returns:
+        BytesIO object containing the Excel file
+    """
+    output = BytesIO()
+    
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        for idx, (header, df) in enumerate(tables_with_headers):
+            # Create sheet name from header (max 31 chars for Excel)
+            sheet_name = header[:31] if header else f"Table {idx + 1}"
+            # Sanitize sheet name (remove invalid characters)
+            sheet_name = re.sub(r'[\\/:*?"<>|]', '_', sheet_name)
+            
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+            
+            # Format the sheet
+            worksheet = writer.sheets[sheet_name]
+            
+            # Header formatting
+            header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+            header_font = Font(bold=True, color="FFFFFF")
+            
+            for cell in worksheet[1]:
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            
+            # Auto-adjust column widths
+            for column in worksheet.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)
+                worksheet.column_dimensions[column_letter].width = adjusted_width
+            
+            # Apply borders to all cells
+            border = Border(
+                left=Side(style='thin'),
+                right=Side(style='thin'),
+                top=Side(style='thin'),
+                bottom=Side(style='thin')
+            )
+            for row in worksheet.iter_rows():
+                for cell in row:
+                    cell.border = border
+                    if cell.row > 1:  # Data rows
+                        cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+    
+    output.seek(0)
+    return output
+
+
 def initialize_production_db():
     """Download production database from HuggingFace Hub if not present locally."""
     # Check if database already exists and is populated
@@ -153,6 +304,10 @@ if "vectorstore" not in st.session_state:
 if "vectorstores_cache" not in st.session_state:
     st.session_state.vectorstores_cache = {}
     st.session_state.vectorstores_loading = False
+
+# Initialize latest response tables for export
+if "latest_tables_with_headers" not in st.session_state:
+    st.session_state.latest_tables_with_headers = []
 
 def get_database_description(vectorstore):
     """Retrieve database description from the loaded vector store collection.
@@ -504,6 +659,21 @@ if prompt := st.chat_input(placeholder_text):
             response_with_hint = response
         
         st.markdown(response_with_hint)
+        
+        # Extract tables from response and enable download if found
+        tables_with_headers = extract_markdown_tables(response)
+        st.session_state.latest_tables_with_headers = tables_with_headers
+        
+        # Add download button if tables were found
+        if tables_with_headers:
+            excel_file = export_tables_to_excel(tables_with_headers)
+            st.download_button(
+                label=f"📥 Download as Excel ({len(tables_with_headers)} table{'s' if len(tables_with_headers) > 1 else ''})",
+                data=excel_file,
+                file_name=f"near_metadata_{st.session_state.selected_database}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="download_tables"
+            )
 
     st.session_state.messages.append({"role": "assistant", "content": response_with_hint})
 
