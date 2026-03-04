@@ -511,7 +511,7 @@ with st.sidebar:
 
 # Add disclaimer about reference information
 st.info("""
-**ℹ️ Disclaimer:** The information provided here is for reference purposes only. 
+**ℹ️ Disclaimer:** The information provided here is for a quick overview only. 
 For more accurate and comprehensive metadata, please check with [Maelstrom catalogue](https://www.maelstrom-research.org/search#lists?type=studies&query=network(in(Mica_network.id,near)),variable(limit(0,20)),study(in(Mica_study.className,Study),limit(0,20))) 
 or the NEAR team.
 """)
