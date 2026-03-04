@@ -478,7 +478,6 @@ with st.sidebar:
     with st.expander("🚀 Feature Coming Soon"):
         st.markdown("""
         - **Multi-Database Search**: Query across multiple databases
-        - **Export Results**: Download as CSV/Excel
         - **Search History**: Track previous searches
         """)
 
