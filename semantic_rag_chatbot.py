@@ -372,27 +372,7 @@ def filter_and_organize_context(query, vectorstore):
         st.error(f"Error retrieving context: {e}")
         return "", []
 
-def should_use_table_format(context_docs):
-    """Intelligently decide whether to use table format based on retrieved content.
-    
-    If retrieved documents are mostly variable definitions, use table format.
-    Otherwise, use prose format for cohort information.
-    
-    Args:
-        context_docs: List of retrieved documents
-    
-    Returns:
-        bool: True if table format should be used, False for prose
-    """
-    if not context_docs:
-        return False
-    
-    # Count variable definition documents
-    var_def_count = sum(1 for doc in context_docs if doc.metadata.get("type") == "variable_definitions")
-    ratio = var_def_count / len(context_docs)
-    
-    # Use table format if >60% of context is variable definitions
-    return ratio > 0.6
+
 
 # ── Main App ──────────────────────────────────────────────────────────────────
 
@@ -537,108 +517,73 @@ if prompt := st.chat_input(placeholder_text):
                 # Get context (already filtered to selected database via collection)
                 # Returns both context text and document list
                 context, context_docs = filter_and_organize_context(prompt, vectorstore)
+
+                # Use unified prompt template for metadata queries with table format
+                prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata.
+
+                COHORT BACKGROUND:
+                {cohort_background}
+
+                ---
+
+                Your task is to answer questions about variables and metadata from this cohort.
+
+                ### VARIABLE DATA:
+                {context}
+
+                ### Question from user:
+                {question}
+
+                ### Your Response Instructions:
+                - Group related variables by theme
+                - Start with a clear, natural explanation of the topic based on the related cohort background
+                - Use your own words to describe what the variables measure
+                - Then, present the variable information in a markdown table as specified below:
+
+                TABLE - Variables by Content (what they measure):
+                | Variable Name | Label | Categories |
+                |---|---|---|
+                | variable_name | What it measures in plain English | Category values if applicable |
                 
-                # Intelligently decide format based on retrieved content
-                use_table_format = should_use_table_format(context_docs)
+                CRITICAL RULES FOR EXTRACTING VARIABLE NAMES:
+                - Column 1: EXTRACT EXACTLY the text that appears after "Variable: " in the source data
+                - Do NOT use any other field names, labels, or descriptions
+                - Do NOT use text from fields like "Description:" or "Sociodemographic Economic Characteristics:"
+                - EXAMPLE: If you see "Variable: age_HT_rounded", MUST write "age_HT_rounded" in Column 1
+                - EXAMPLE: If you see "Variable: löpnr", MUST write "löpnr" in Column 1
+                - NEVER modify, shorten, or translate the variable name
+                - NEVER invent variable names - only extract exactly what follows "Variable: "
+                
+                IMPORTANT NOTE ON VARIABLE AVAILABILITY:
+                For information about which cohorts and tables contain these variables, please refer to the Maelstrom catalogue at: https://www.maelstrom-research.org/
+                
+                EXAMPLE OF CORRECT FORMAT:
+                "In SNAC-K, several variables measure basic demographics. Participants are identified by a unique proband number (löpnr). The cohort includes both men and women, tracked through a sex variable. Birth dates are recorded to calculate age.
 
-                if use_table_format:
-                    # Variable-specific prompt with tables
-                    prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata.
+                | Variable Name | Label | Categories |
+                |---|---|---|
+                | löpnr | Unique participant identifier | N/A (unique ID) |
+                | kön | Participant's biological sex | 1=man, 2=woman |
+                | Birthday | Date of birth for age calculation | Date format |
+                
 
-                    COHORT BACKGROUND:
-                    {cohort_background}
+                Answer:"""
 
-                    ---
+                PROMPT = PromptTemplate(
+                    template=prompt_template, 
+                    input_variables=["cohort_background", "context", "question"]
+                )
 
-                    Your task is to answer questions about variables and metadata from this cohort.
-
-                    ### VARIABLE DATA:
-                    {context}
-
-                    ### Question from user:
-                    {question}
-
-                    ### Your Response Instructions:
-                    - Group related variables by theme
-                    - Start with a clear, natural explanation of the topic based on the related cohort background
-                    - Use your own words to describe what the variables measure
-                    - Then, present the variable information in a markdown table as specified below:
-
-                    TABLE - Variables by Content (what they measure):
-                    | Variable Name | Label | Categories |
-                    |---|---|---|
-                    | variable_name | What it measures in plain English | Category values if applicable |
-                    
-                    CRITICAL RULES FOR EXTRACTING VARIABLE NAMES:
-                    - Column 1: EXTRACT EXACTLY the text that appears after "Variable: " in the source data
-                    - Do NOT use any other field names, labels, or descriptions
-                    - Do NOT use text from fields like "Description:" or "Sociodemographic Economic Characteristics:"
-                    - EXAMPLE: If you see "Variable: age_HT_rounded", MUST write "age_HT_rounded" in Column 1
-                    - EXAMPLE: If you see "Variable: löpnr", MUST write "löpnr" in Column 1
-                    - NEVER modify, shorten, or translate the variable name
-                    - NEVER invent variable names - only extract exactly what follows "Variable: "
-                    
-                    IMPORTANT NOTE ON VARIABLE AVAILABILITY:
-                    For information about which cohorts and tables contain these variables, please refer to the Maelstrom catalogue at: https://www.maelstrom-research.org/
-                    
-                    EXAMPLE OF CORRECT FORMAT:
-                    "In SNAC-K, several variables measure basic demographics. Participants are identified by a unique proband number (löpnr). The cohort includes both men and women, tracked through a sex variable. Birth dates are recorded to calculate age.
-
-                    | Variable Name | Label | Categories |
-                    |---|---|---|
-                    | löpnr | Unique participant identifier | N/A (unique ID) |
-                    | kön | Participant's biological sex | 1=man, 2=woman |
-                    | Birthday | Date of birth for age calculation | Date format |
-                    
-
-                    Answer:"""
-
-                    PROMPT = PromptTemplate(
-                        template=prompt_template, 
-                        input_variables=["cohort_background", "context", "question"]
-                    )
-
-                    rag_chain = (
-                        {
-                            "cohort_background": lambda _: cohort_background,
-                            "context": lambda _: context,
-                            "question": RunnablePassthrough()
-                        }
-                        | PROMPT
-                        | llm
-                        | StrOutputParser()
-                    )
-                else:
-                    # General cohort question - no variables table
-                    prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata.
-
-                    ### COHORT BACKGROUND:
-                    {cohort_background}
-
-                    ### Question from user:
-                    {question}
-
-                    ### Your Response Instructions:
-                    - Answer the user's question about the cohort using the background information provided
-                    - Be clear and concise, using plain language
-                    - Reference specific cohort names and details when relevant
-
-                    Answer:"""
-
-                    PROMPT = PromptTemplate(
-                        template=prompt_template, 
-                        input_variables=["cohort_background", "question"]
-                    )
-
-                    rag_chain = (
-                        {
-                            "cohort_background": lambda _: cohort_background,
-                            "question": RunnablePassthrough()
-                        }
-                        | PROMPT
-                        | llm
-                        | StrOutputParser()
-                    )
+                rag_chain = (
+                    {
+                        "cohort_background": lambda _: cohort_background,
+                        "context": lambda _: context,
+                        "question": RunnablePassthrough()
+                    }
+                    | PROMPT
+                    | llm
+                    | StrOutputParser()
+                )
 
                 try:
                     response = rag_chain.invoke(prompt)
