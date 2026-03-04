@@ -335,6 +335,54 @@ def get_database_description(vectorstore):
         st.warning(f"Could not retrieve database description: {e}")
         return ""
 
+def get_relevant_background(query, vectorstore):
+    """Retrieve cohort background information dynamically based on the user's query.
+    
+    This function performs semantic search on database_description documents to
+    find background information most relevant to the user's question, making the
+    background context adaptive rather than static.
+    
+    Args:
+        query: User's question
+        vectorstore: Chroma vector store (already filtered to selected database)
+    
+    Returns:
+        str: Relevant cohort background text
+    """
+    if vectorstore is None:
+        return ""
+    
+    try:
+        # Perform semantic search on the entire collection
+        retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+        docs = retriever.invoke(query)
+        
+        background_docs = []
+        
+        for doc in docs:
+            # Prioritize database_description documents, but include other relevant ones
+            if doc.metadata.get("type") == "database_description":
+                background_docs.append(doc)
+        
+        # If no specific database descriptions found, try to get the general description
+        if not background_docs:
+            general_background = get_database_description(vectorstore)
+            if general_background:
+                return general_background
+            return ""
+        
+        # Combine multiple relevant background passages for richer context
+        # Use top results (limit to 2 to avoid overwhelming the LLM)
+        combined_background = "\n\n---\n\n".join(
+            [doc.page_content for doc in background_docs[:2]]
+        )
+        
+        return combined_background if combined_background else ""
+        
+    except Exception as e:
+        # Fallback to general description on error
+        return get_database_description(vectorstore)
+
 def filter_and_organize_context(query, vectorstore):
     """Retrieve and organize context - only variable definitions.
     
@@ -511,9 +559,6 @@ if prompt := st.chat_input(placeholder_text):
                     temperature=0.1,
                 )
                 
-                # Retrieve relevant cohort background
-                cohort_background = get_database_description(vectorstore)
-                
                 # Get context (already filtered to selected database via collection)
                 # Returns both context text and document list
                 context, context_docs = filter_and_organize_context(prompt, vectorstore)
@@ -576,7 +621,7 @@ if prompt := st.chat_input(placeholder_text):
 
                 rag_chain = (
                     {
-                        "cohort_background": lambda _: cohort_background,
+                        "cohort_background": lambda user_query: get_relevant_background(user_query, vectorstore),
                         "context": lambda _: context,
                         "question": RunnablePassthrough()
                     }

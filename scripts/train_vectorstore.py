@@ -42,13 +42,40 @@ def process_database_to_vectorstore(data_dir: str, database_name: str = None):
     prefix = f"[{database_name}] " if database_name else ""
     print(f"\n{prefix}Processing {data_dir}...")
     
+    # Initialize text splitters for different document types
+    xml_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=800,
+        chunk_overlap=150,
+        separators=[
+            "\n\n",
+            "Variable:",
+            "\n",
+            " "
+        ]
+    )
+    
+    # JSON (database description) uses larger chunks and focuses on paragraph breaks
+    json_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1200,  # Larger chunks for coherent descriptive text
+        chunk_overlap=200,
+        separators=[
+            "\n\n",  # Paragraph breaks
+            "Data Collection",
+            "Description:",
+            "\n",
+            " "
+        ]
+    )
+    
     # Find and add the JSON description file
     json_files = glob.glob(os.path.join(data_dir, "*.json"))
     for json_file in json_files:
         try:
             doc = parse_json_to_document(json_file, database_name=database_name)
-            documents.append(doc)
-            print(f"  ✓ Loaded {os.path.basename(json_file)}")
+            # Split JSON documents with the JSON-optimized splitter
+            json_chunks = json_splitter.split_documents([doc])
+            documents.extend(json_chunks)
+            print(f"  ✓ Loaded {os.path.basename(json_file)} ({len(json_chunks)} chunks)")
         except Exception as e:
             print(f"  ✗ Could not read {json_file}: {e}")
     
@@ -61,31 +88,19 @@ def process_database_to_vectorstore(data_dir: str, database_name: str = None):
         
         try:
             doc = parse_xml_to_document(file_path, database_name=database_name)
-            documents.append(doc)
-            print(f"  ✓ Loaded {file_name}")
+            # Split XML documents with the XML-optimized splitter
+            xml_chunks = xml_splitter.split_documents([doc])
+            documents.extend(xml_chunks)
+            print(f"  ✓ Loaded {file_name} ({len(xml_chunks)} chunks)")
         except Exception as e:
             print(f"  ✗ Could not parse {file_name}: {e}")
     
     if not documents:
         raise FileNotFoundError(f"No valid documents could be processed from {data_dir}")
     
-    print(f"  Total documents: {len(documents)}")
+    print(f"  Total chunks: {len(documents)}")
     
-    # Split into smaller chunks
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=800,
-        chunk_overlap=150,
-        separators=[
-            "\n\n",
-            "Variable:",
-            "\n",
-            " "
-        ]
-    )
-    chunks = text_splitter.split_documents(documents)
-    print(f"  Total chunks: {len(chunks)}")
-    
-    return chunks
+    return documents
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
@@ -151,8 +166,9 @@ if __name__ == "__main__":
         print(f"Total items across all collections: {total_items}")
         print(f"Vector store saved to: {os.path.abspath(target_db)}")
         print(f"Collections created: {', '.join([f'{db.lower()}_metadata' for db in selected_databases])}")
-        print("\n💡 Next step: Upload chroma_prod_db to HuggingFace Hub")
-        print("   huggingface-cli upload bobo200612/near-chroma-prod-db ./chroma_prod_db.zip chroma_prod_db.zip --repo-type=dataset")
+        print("\n💡 Next step: Compress and upload chroma_prod_db to HuggingFace Hub")
+        print("   python -c 'import shutil; shutil.make_archive(\"chroma_prod_db\", \"zip\", \".\", \"chroma_prod_db\")'")
+        print("   huggingface-cli upload bobo200612/near-chroma-prod-db ./chroma_prod_db.zip chroma_prod_db.zip --repo-type=dataset --commit-message 'xxxxx'")
             
     except Exception as e:
         print(f"\n✗ Error during training: {e}")
