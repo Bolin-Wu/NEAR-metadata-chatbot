@@ -203,6 +203,7 @@ def initialize_production_db():
     """Download production database from HuggingFace Hub if not present locally."""
     # Check if database already exists and is populated
     if os.path.exists(CHROMA_DB) and os.listdir(CHROMA_DB):
+        print(f"✅ Chroma DB already exists at {CHROMA_DB}")
         return  # Already have local copy
     
     if not HUGGINGFACE_REPO_ID:
@@ -214,33 +215,84 @@ def initialize_production_db():
         
         progress_placeholder = st.empty()
         progress_placeholder.info("📥 Downloading production database from HuggingFace Hub...")
+        print(f"Attempting to download from repo: {HUGGINGFACE_REPO_ID}")
         
         # Download zip from HuggingFace Hub
-        zip_path = hf_hub_download(
-            repo_id=HUGGINGFACE_REPO_ID,
-            filename="chroma_prod_db.zip",
-            repo_type="dataset",
-            cache_dir=Path.home() / ".cache" / "huggingface"
-        )
+        try:
+            zip_path = hf_hub_download(
+                repo_id=HUGGINGFACE_REPO_ID,
+                filename="chroma_prod_db.zip",
+                repo_type="dataset",
+                cache_dir=Path.home() / ".cache" / "huggingface"
+            )
+            print(f"✅ Downloaded to: {zip_path}")
+        except Exception as e:
+            error_msg = f"Failed to download from HuggingFace: {e}"
+            print(f"❌ {error_msg}")
+            progress_placeholder.error(f"❌ {error_msg}")
+            st.stop()
         
         # Extract to temp directory
         progress_placeholder.info("📦 Extracting database...")
         temp_dir = tempfile.mkdtemp()
+        print(f"Extracting to temp dir: {temp_dir}")
         
         try:
             with zipfile.ZipFile(zip_path, "r") as zip_ref:
                 zip_ref.extractall(temp_dir)
             
-            # The zip contains the contents of chroma_prod_db directly
-            # (not wrapped in a chroma_prod_db folder)
+            # List what was extracted
+            extracted_contents = os.listdir(temp_dir)
+            print(f"Extracted files/folders: {extracted_contents}")
+            
+            # The zip might contain either:
+            # A) Direct contents of chroma_prod_db (chroma.sqlite3, UUID folders, etc)
+            # B) A chroma_prod_db folder (need to move its contents)
+            
+            if "chroma_prod_db" in extracted_contents and len(extracted_contents) == 1:
+                # Case B: zip had a top-level chroma_prod_db folder
+                extracted_db_path = os.path.join(temp_dir, "chroma_prod_db")
+                print(f"Found chroma_prod_db folder inside zip, moving contents from: {extracted_db_path}")
+                source_path = extracted_db_path
+            else:
+                # Case A: zip had direct contents
+                print(f"Zip contains direct DB contents, using: {temp_dir}")
+                source_path = temp_dir
+            
+            # Verify chroma.sqlite3 exists in the source
+            sqlite_path = os.path.join(source_path, "chroma.sqlite3")
+            if not os.path.exists(sqlite_path):
+                available_files = os.listdir(source_path)[:10]
+                error_msg = f"❌ chroma.sqlite3 not found in extracted contents. Found: {available_files}"
+                print(error_msg)
+                progress_placeholder.error(error_msg)
+                st.stop()
+            
+            print(f"✅ Found chroma.sqlite3 in {source_path}")
+            
+            # Remove old CHROMA_DB if it exists
             if os.path.exists(CHROMA_DB):
+                print(f"Removing old CHROMA_DB at {CHROMA_DB}")
                 shutil.rmtree(CHROMA_DB)
             
-            # Move extracted contents to CHROMA_DB
-            shutil.move(temp_dir, CHROMA_DB)
-            progress_placeholder.success("✅ Database downloaded and ready!")
+            # Move extracted DB to CHROMA_DB location
+            print(f"Moving {source_path} to {CHROMA_DB}")
+            shutil.move(source_path, CHROMA_DB)
+            
+            # Verify the move
+            if os.path.exists(os.path.join(CHROMA_DB, "chroma.sqlite3")):
+                print(f"✅ Successfully moved DB to {CHROMA_DB}")
+                progress_placeholder.success("✅ Database downloaded and ready!")
+            else:
+                error_msg = f"❌ chroma.sqlite3 not found at {CHROMA_DB} after move"
+                print(error_msg)
+                progress_placeholder.error(error_msg)
+                st.stop()
+                
         except Exception as e:
-            progress_placeholder.error(f"❌ Failed to extract: {e}")
+            error_msg = f"Failed to extract: {e}"
+            print(f"❌ {error_msg}")
+            progress_placeholder.error(f"❌ {error_msg}")
             st.error(f"Failed to extract database: {e}")
             st.stop()
         finally:
@@ -251,7 +303,9 @@ def initialize_production_db():
         st.error("❌ Install huggingface_hub: `pip install huggingface_hub`")
         st.stop()
     except Exception as e:
-        st.error(f"❌ Could not download from HuggingFace: {e}")
+        error_msg = f"Unexpected error: {e}"
+        print(f"❌ {error_msg}")
+        st.error(f"❌ {error_msg}")
         st.stop()
 
 @st.cache_resource(show_spinner="Preparing embeddings model...")
