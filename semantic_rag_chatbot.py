@@ -173,6 +173,16 @@ def _parse_markdown_table(table_lines):
         
         df = pd.DataFrame(rows, columns=headers)
         
+        # Remove rows with empty critical columns (prevent incomplete entries)
+        # Keep only rows where Variable Name, Label, and Categories are non-empty
+        critical_cols = [col for col in ['Variable Name', 'Label', 'Categories'] if col in df.columns]
+        if critical_cols:
+            # Filter rows where all critical columns have non-empty values
+            df = df[df[critical_cols].apply(lambda row: all(val and str(val).strip() for val in row), axis=1)]
+        
+        if df.empty:
+            return None
+        
         # Deduplicate rows with identical Label and Categories
         # Variables with the same label and categories are considered duplicates
         # Keep only the first occurrence (first source file)
