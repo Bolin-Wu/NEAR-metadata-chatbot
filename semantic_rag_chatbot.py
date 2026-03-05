@@ -1,5 +1,5 @@
 import os
-import sys
+import logging
 from pathlib import Path
 import tempfile
 import re
@@ -7,7 +7,6 @@ from io import BytesIO
 
 import streamlit as st
 import pandas as pd
-from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
@@ -20,6 +19,10 @@ import shutil
 import zipfile
 
 load_dotenv()
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -201,10 +204,8 @@ def export_tables_to_excel(tables_with_headers):
 
 def initialize_production_db():
     """Download production database from HuggingFace Hub if not present locally."""
-    # Check if database already exists and is populated
     if os.path.exists(CHROMA_DB) and os.listdir(CHROMA_DB):
-        print(f"✅ Chroma DB already exists at {CHROMA_DB}")
-        return  # Already have local copy
+        return
     
     if not HUGGINGFACE_REPO_ID:
         st.error("❌ HUGGINGFACE_REPO_ID not configured. Please contact the maintainer.")
@@ -215,9 +216,7 @@ def initialize_production_db():
         
         progress_placeholder = st.empty()
         progress_placeholder.info("📥 Downloading production database from HuggingFace Hub...")
-        print(f"Attempting to download from repo: {HUGGINGFACE_REPO_ID}")
         
-        # Download zip from HuggingFace Hub
         try:
             zip_path = hf_hub_download(
                 repo_id=HUGGINGFACE_REPO_ID,
@@ -225,75 +224,49 @@ def initialize_production_db():
                 repo_type="dataset",
                 cache_dir=Path.home() / ".cache" / "huggingface"
             )
-            print(f"✅ Downloaded to: {zip_path}")
+            logger.info(f"Downloaded database from HuggingFace: {HUGGINGFACE_REPO_ID}")
         except Exception as e:
             error_msg = f"Failed to download from HuggingFace: {e}"
-            print(f"❌ {error_msg}")
+            logger.error(error_msg)
             progress_placeholder.error(f"❌ {error_msg}")
             st.stop()
         
-        # Extract to temp directory
         progress_placeholder.info("📦 Extracting database...")
         temp_dir = tempfile.mkdtemp()
-        print(f"Extracting to temp dir: {temp_dir}")
         
         try:
             with zipfile.ZipFile(zip_path, "r") as zip_ref:
                 zip_ref.extractall(temp_dir)
             
-            # List what was extracted
             extracted_contents = os.listdir(temp_dir)
-            print(f"Extracted files/folders: {extracted_contents}")
             
-            # The zip might contain either:
-            # A) Direct contents of chroma_prod_db (chroma.sqlite3, UUID folders, etc)
-            # B) A chroma_prod_db folder (need to move its contents)
-            
+            # Handle both zip structures: with or without top-level chroma_prod_db folder
             if "chroma_prod_db" in extracted_contents and len(extracted_contents) == 1:
-                # Case B: zip had a top-level chroma_prod_db folder
-                extracted_db_path = os.path.join(temp_dir, "chroma_prod_db")
-                print(f"Found chroma_prod_db folder inside zip, moving contents from: {extracted_db_path}")
-                source_path = extracted_db_path
+                source_path = os.path.join(temp_dir, "chroma_prod_db")
             else:
-                # Case A: zip had direct contents
-                print(f"Zip contains direct DB contents, using: {temp_dir}")
                 source_path = temp_dir
             
-            # Verify chroma.sqlite3 exists in the source
             sqlite_path = os.path.join(source_path, "chroma.sqlite3")
             if not os.path.exists(sqlite_path):
-                available_files = os.listdir(source_path)[:10]
-                error_msg = f"❌ chroma.sqlite3 not found in extracted contents. Found: {available_files}"
-                print(error_msg)
-                progress_placeholder.error(error_msg)
+                error_files = os.listdir(source_path)[:5]
+                progress_placeholder.error(f"❌ Database files corrupted. Found: {error_files}")
                 st.stop()
             
-            print(f"✅ Found chroma.sqlite3 in {source_path}")
-            
-            # Remove old CHROMA_DB if it exists
             if os.path.exists(CHROMA_DB):
-                print(f"Removing old CHROMA_DB at {CHROMA_DB}")
                 shutil.rmtree(CHROMA_DB)
             
-            # Move extracted DB to CHROMA_DB location
-            print(f"Moving {source_path} to {CHROMA_DB}")
             shutil.move(source_path, CHROMA_DB)
             
-            # Verify the move
             if os.path.exists(os.path.join(CHROMA_DB, "chroma.sqlite3")):
-                print(f"✅ Successfully moved DB to {CHROMA_DB}")
+                logger.info("Database extracted and ready")
                 progress_placeholder.success("✅ Database downloaded and ready!")
             else:
-                error_msg = f"❌ chroma.sqlite3 not found at {CHROMA_DB} after move"
-                print(error_msg)
-                progress_placeholder.error(error_msg)
+                progress_placeholder.error("❌ Database extraction failed")
                 st.stop()
                 
         except Exception as e:
-            error_msg = f"Failed to extract: {e}"
-            print(f"❌ {error_msg}")
-            progress_placeholder.error(f"❌ {error_msg}")
-            st.error(f"Failed to extract database: {e}")
+            logger.error(f"Extraction failed: {e}")
+            progress_placeholder.error(f"❌ Failed to extract: {e}")
             st.stop()
         finally:
             if os.path.exists(temp_dir):
@@ -303,9 +276,8 @@ def initialize_production_db():
         st.error("❌ Install huggingface_hub: `pip install huggingface_hub`")
         st.stop()
     except Exception as e:
-        error_msg = f"Unexpected error: {e}"
-        print(f"❌ {error_msg}")
-        st.error(f"❌ {error_msg}")
+        logger.error(f"Unexpected error: {e}")
+        st.error(f"❌ {e}")
         st.stop()
 
 @st.cache_resource(show_spinner="Preparing embeddings model...")
@@ -313,37 +285,21 @@ def get_embeddings():
     return HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
 
 
-# Known databases (in case data/ folder not available)
 def get_available_databases():
-    """Get list of available databases by querying Chroma collections.
-    
-    Works even if ./data folder is not present (e.g., on Streamlit Cloud).
-    """
+    """Get list of available databases by querying Chroma collections."""
     databases = []
     
     try:
-        # Check if the Chroma directory exists
         if not os.path.exists(CHROMA_DB):
-            error_msg = f"❌ Chroma directory not found: {CHROMA_DB}"
-            print(error_msg)
-            st.error(error_msg)
+            st.error(f"❌ Database directory not found: {CHROMA_DB}")
             st.stop()
         
-        # Verify the directory is not empty
-        chroma_contents = os.listdir(CHROMA_DB)
-        if not chroma_contents:
-            error_msg = f"❌ Chroma directory is empty: {CHROMA_DB}"
-            print(error_msg)
-            st.error(error_msg)
+        if not os.listdir(CHROMA_DB):
+            st.error(f"❌ Database directory is empty: {CHROMA_DB}")
             st.stop()
-        
-        print(f"✅ Chroma DB found at {CHROMA_DB} with {len(chroma_contents)} items")
         
         embeddings = get_embeddings()
-        print("✅ Embeddings loaded")
         
-        # Check each known database to see if its collection exists in Chroma
-        failed_collections = []
         for db_name in KNOWN_DATABASES:
             collection_name = f"{db_name.lower()}_metadata"
             try:
@@ -352,32 +308,20 @@ def get_available_databases():
                     embedding_function=embeddings,
                     collection_name=collection_name
                 )
-                count = vectorstore._collection.count()
-                if count > 0:
+                if vectorstore._collection.count() > 0:
                     databases.append(db_name)
-                    print(f"  ✅ {db_name}: {count} documents")
-                else:
-                    print(f"  ⚠️  {db_name}: collection empty (0 docs)")
             except Exception as e:
-                failed_collections.append((db_name, str(e)))
-                print(f"  ❌ {db_name}: {str(e)[:80]}")
+                logger.debug(f"Collection {db_name} not available: {e}")
         
-        # If no databases found, log detailed info
         if not databases:
-            print(f"\n⚠️  WARNING: No databases loaded!")
-            print(f"Failed collections: {len(failed_collections)}")
-            if failed_collections:
-                print("Details:")
-                for db, err in failed_collections[:3]:
-                    print(f"  • {db}: {err[:100]}")
+            logger.warning("No databases could be loaded from Chroma")
         else:
-            print(f"\n✅ Successfully loaded {len(databases)} databases: {databases}")
+            logger.info(f"Loaded {len(databases)} databases")
         
         return sorted(databases)
     except Exception as e:
-        error_msg = f"❌ Error retrieving databases: {e}"
-        print(error_msg)
-        st.error(error_msg)
+        logger.error(f"Error retrieving databases: {e}")
+        st.error(f"❌ Could not load databases: {e}")
         return []
 
 # Initialize vectorstore as None (will be set from cache on database selection)
@@ -395,45 +339,25 @@ if "latest_tables_with_headers" not in st.session_state:
     st.session_state.latest_tables_with_headers = []
 
 def get_database_description(vectorstore):
-    """Retrieve database description from the loaded vector store collection.
-    
-    Since each collection is for a single database, we just need to find the 
-    database_description document in the current collection.
-    """
+    """Retrieve database description from the vector store."""
     if vectorstore is None:
         return ""
     
     try:
-        collection = vectorstore._collection
-        all_docs = collection.get()
+        all_docs = vectorstore._collection.get()
         
         if all_docs and all_docs.get('metadatas'):
             for i, metadata in enumerate(all_docs['metadatas']):
                 if metadata.get("type") == "database_description":
-                    # Return the content of this document
                     if all_docs.get('documents') and i < len(all_docs['documents']):
                         return all_docs['documents'][i]
-        
         return ""
-        
     except Exception as e:
-        st.warning(f"Could not retrieve database description: {e}")
+        logger.error(f"Could not retrieve database description: {e}")
         return ""
 
 def get_relevant_background(query, vectorstore):
-    """Retrieve cohort background information dynamically based on the user's query.
-    
-    This function performs semantic search on database_description documents to
-    find background information most relevant to the user's question, making the
-    background context adaptive rather than static.
-    
-    Args:
-        query: User's question
-        vectorstore: Chroma vector store (already filtered to selected database)
-    
-    Returns:
-        str: Relevant cohort background text
-    """
+    """Retrieve cohort background information relevant to the user's query."""
     if vectorstore is None:
         return ""
     
@@ -442,66 +366,39 @@ def get_relevant_background(query, vectorstore):
         retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
         docs = retriever.invoke(query)
         
-        background_docs = []
+        background_docs = [
+            doc for doc in docs 
+            if doc.metadata.get("type") == "database_description"
+        ]
         
-        for doc in docs:
-            # Prioritize database_description documents, but include other relevant ones
-            if doc.metadata.get("type") == "database_description":
-                background_docs.append(doc)
-        
-        # If no specific database descriptions found, try to get the general description
         if not background_docs:
-            general_background = get_database_description(vectorstore)
-            if general_background:
-                return general_background
-            return ""
+            return get_database_description(vectorstore)
         
-        # Combine multiple relevant background passages for richer context
-        # Use top results (limit to 2 to avoid overwhelming the LLM)
-        combined_background = "\n\n---\n\n".join(
+        return "\n\n---\n\n".join(
             [doc.page_content for doc in background_docs[:2]]
         )
-        
-        return combined_background if combined_background else ""
-        
     except Exception as e:
-        # Fallback to general description on error
+        logger.error(f"Error retrieving background: {e}")
         return get_database_description(vectorstore)
 
 def filter_and_organize_context(query, vectorstore):
-    """Retrieve and organize context - only variable definitions.
-    
-    Since each collection is for a single database, we just need to:
-    1. Do semantic search
-    2. Filter for variable_definitions type
-    3. Return up to 20 results
-    
-    Args:
-        query: User's question
-        vectorstore: Chroma vector store (already filtered to selected database)
-    
-    Returns:
-        tuple: (context_text, full_docs_list)
-    """
+    """Retrieve variable definitions relevant to the query."""
     if vectorstore is None:
         return "", []
     
     try:
-        # Perform semantic search on the selected database collection
         retriever = vectorstore.as_retriever(search_kwargs={"k": 20})
         docs = retriever.invoke(query)
         
-        var_defs = []
+        var_defs = [
+            doc for doc in docs 
+            if doc.metadata.get("type") == "variable_definitions"
+        ]
         
-        for doc in docs:
-            # Only include variable definitions
-            if doc.metadata.get("type") == "variable_definitions":
-                var_defs.append(doc)
-        
-        # Return variable definitions and full docs list
         context_text = "\n\n---\n\n".join([doc.page_content for doc in var_defs])
         return context_text, var_defs
     except Exception as e:
+        logger.error(f"Error retrieving context: {e}")
         st.error(f"Error retrieving context: {e}")
         return "", []
 
@@ -525,23 +422,15 @@ if "available_databases_loaded" not in st.session_state:
         st.session_state.available_databases = get_available_databases()
         st.session_state.available_databases_loaded = True
     
-    # Show diagnostic info if no databases found
     if not st.session_state.available_databases:
         st.error("""
         ❌ **No databases were discovered!**
         
-        Possible causes:
-        1. Chroma database did not extract correctly
-        2. Collection names mismatch in SQLite
-        3. Embeddings model loading issue
-        
-        **Troubleshooting:**
-        - Click "Try Again" in the sidebar to retry
-        - Check browser console (F12) for error messages
-        - May need to restart the app
+        Please try:
+        - Click "Refresh" in the sidebar to retry
+        - Restart the app
+        - Contact the maintainer
         """)
-        # Also log to console
-        print("⚠️  WARNING: get_available_databases() returned empty list")
 
 # Preload all vectorstores in the background (cache them)
 if not st.session_state.vectorstores_loading and st.session_state.available_databases:
@@ -575,7 +464,6 @@ with st.sidebar:
     # Database selection
     st.subheader("Select Database")
     
-    
     if st.session_state.available_databases:
         selected_database = st.radio(
             "Choose a database to query:",
@@ -594,11 +482,6 @@ with st.sidebar:
         
     else:
         st.warning("No databases available")
-        if st.button("Try Again", key="retry_databases"):
-            st.session_state.available_databases_loaded = False
-            st.session_state.database_load_attempts = 0
-            st.cache_resource.clear()  # Clear Streamlit's resource cache
-            st.rerun()
     
     st.markdown("---")
     
