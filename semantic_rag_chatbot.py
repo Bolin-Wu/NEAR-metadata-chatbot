@@ -273,9 +273,16 @@ def get_available_databases():
             st.error(f"❌ Chroma directory not found: {CHROMA_DB}")
             st.stop()
         
+        # Verify the directory is not empty
+        chroma_contents = os.listdir(CHROMA_DB)
+        if not chroma_contents:
+            st.error(f"❌ Chroma directory is empty: {CHROMA_DB}. Download may have failed.")
+            st.stop()
+        
         embeddings = get_embeddings()
         
         # Check each known database to see if its collection exists in Chroma
+        failed_collections = []
         for db_name in KNOWN_DATABASES:
             collection_name = f"{db_name.lower()}_metadata"
             try:
@@ -288,11 +295,16 @@ def get_available_databases():
                 if count > 0:
                     databases.append(db_name)
             except Exception as e:
-                pass
+                failed_collections.append((db_name, str(e)))
+        
+        # If no databases found, log what went wrong
+        if not databases and failed_collections:
+            error_details = "\n".join([f"  • {db}: {err}" for db, err in failed_collections[:3]])
+            st.warning(f"⚠️ Could not load collections (showing first 3):\n{error_details}\n\nDEBUG: CHROMA_DB={CHROMA_DB}\nContents: {chroma_contents[:5]}")
         
         return sorted(databases)
     except Exception as e:
-        st.warning(f"Could not retrieve available databases: {e}")
+        st.error(f"❌ Error retrieving databases: {e}")
         return []
 
 # Initialize vectorstore as None (will be set from cache on database selection)
@@ -471,6 +483,16 @@ with st.sidebar:
     
     # Database selection
     st.subheader("Select Database")
+    
+    # Add refresh button
+    col1, col2 = st.columns([3, 1])
+    with col2:
+        if st.button("🔄 Refresh", key="refresh_databases"):
+            st.session_state.available_databases_loaded = False
+            st.session_state.database_load_attempts = 0
+            st.cache_resource.clear()  # Clear Streamlit's resource cache
+            st.rerun()
+    
     if st.session_state.available_databases:
         selected_database = st.radio(
             "Choose a database to query:",
@@ -489,6 +511,11 @@ with st.sidebar:
         
     else:
         st.warning("No databases available")
+        if st.button("Try Again", key="retry_databases"):
+            st.session_state.available_databases_loaded = False
+            st.session_state.database_load_attempts = 0
+            st.cache_resource.clear()  # Clear Streamlit's resource cache
+            st.rerun()
     
     st.markdown("---")
     
