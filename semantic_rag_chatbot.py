@@ -57,55 +57,91 @@ except:
 
 # ── Functions ─────────────────────────────────────────────────────────────────
 
-def extract_markdown_tables(text):
-    """Extract markdown tables from text, handling multiple tables with headers.
+def _find_table_blocks(text):
+    """Find all table blocks in text and return their components.
     
     Args:
-        text: String containing markdown tables
+        text: String potentially containing markdown tables
     
     Returns:
-        List of tuples: (table_header_text, DataFrame) for each table found
+        List of dicts with keys:
+        - 'before_lines': Text lines before this table
+        - 'header': Header line (text directly before table)
+        - 'table_lines': The markdown table lines
     """
-    tables_with_headers = []
-    
-    # Split by table blocks - look for patterns of | ... |
-    # Markdown tables are identified by lines starting with |
     lines = text.split('\n')
+    blocks = []
     current_table = []
     last_header = None
+    before_lines = []
     
-    i = 0
-    while i < len(lines):
-        line = lines[i].strip()
+    for i, original_line in enumerate(lines):
+        line = original_line.strip()
         
-        # Look for a header line - text that comes before a table
+        # Look for header (non-table text followed by table)
         if line and not line.startswith('|') and i + 1 < len(lines):
             next_line = lines[i + 1].strip()
-            # Check if next line starts a table
             if next_line.startswith('|'):
-                last_header = line
+                last_header = original_line
         
-        # Check if this line is part of a table
+        # Check if this is a table line
         if line.startswith('|') and line.endswith('|'):
             current_table.append(line)
         else:
-            # End of current table
+            # End of table - save it
             if current_table:
-                # Parse the accumulated table lines
-                df = _parse_markdown_table(current_table)
-                if df is not None and not df.empty:
-                    tables_with_headers.append((last_header or f"Table {len(tables_with_headers) + 1}", df))
+                blocks.append({
+                    'before_lines': before_lines,
+                    'header': last_header,
+                    'table_lines': current_table,
+                    'after_line': original_line
+                })
                 current_table = []
-        
-        i += 1
+                last_header = None
+                before_lines = []
+            else:
+                before_lines.append(original_line)
     
-    # Don't forget the last table
+    # Handle final table if present
     if current_table:
-        df = _parse_markdown_table(current_table)
-        if df is not None and not df.empty:
-            tables_with_headers.append((last_header or f"Table {len(tables_with_headers) + 1}", df))
+        blocks.append({
+            'before_lines': before_lines,
+            'header': last_header,
+            'table_lines': current_table,
+            'after_line': None
+        })
+    else:
+        before_lines.append(None)  # Track remaining lines
     
-    return tables_with_headers
+    return blocks
+
+
+def _dataframe_to_markdown(df, header=None):
+    """Convert a DataFrame to markdown table lines.
+    
+    Args:
+        df: pandas DataFrame
+        header: Optional header text to prepend
+    
+    Returns:
+        List of markdown table lines
+    """
+    if df is None or df.empty:
+        return []
+    
+    lines = []
+    if header:
+        lines.append(header)
+    
+    # Header row
+    lines.append("|" + "|".join(f" {col} " for col in df.columns) + "|")
+    # Separator
+    lines.append("|" + "|".join("---" for _ in df.columns) + "|")
+    # Data rows
+    for _, row in df.iterrows():
+        lines.append("|" + "|".join(f" {str(val)} " for val in row) + "|")
+    
+    return lines
 
 
 def _parse_markdown_table(table_lines):
@@ -135,9 +171,74 @@ def _parse_markdown_table(table_lines):
         if not rows:
             return None
         
-        return pd.DataFrame(rows, columns=headers)
+        df = pd.DataFrame(rows, columns=headers)
+        
+        # Deduplicate rows with identical Label and Categories
+        # Variables with the same label and categories are considered duplicates
+        # Keep only the first occurrence (first source file)
+        # This makes the export more succinct for reference purposes
+        subset_cols = [col for col in ['Label', 'Categories'] if col in df.columns]
+        if subset_cols:
+            df = df.drop_duplicates(subset=subset_cols, keep='first')
+        
+        return df
     except Exception as e:
         return None
+    
+def extract_markdown_tables(text):
+    """Extract markdown tables from text, handling multiple tables with headers.
+    
+    Args:
+        text: String containing markdown tables
+    
+    Returns:
+        List of tuples: (table_header_text, DataFrame) for each table found
+    """
+    tables_with_headers = []
+    blocks = _find_table_blocks(text)
+    
+    for block in blocks:
+        df = _parse_markdown_table(block['table_lines'])
+        if df is not None and not df.empty:
+            header = block['header'] or f"Table {len(tables_with_headers) + 1}"
+            tables_with_headers.append((header, df))
+    
+    return tables_with_headers
+
+
+def deduplicate_markdown_response(text):
+    """Remove duplicate table rows from markdown response and reconstruct.
+    
+    Extracts tables, deduplicates them, and reconstructs the markdown
+    with deduplicated tables. Non-table content is preserved as-is.
+    
+    Args:
+        text: String containing markdown with tables
+    
+    Returns:
+        String with deduplicated tables
+    """
+    blocks = _find_table_blocks(text)
+    result = []
+    
+    for block in blocks:
+        # Add lines before this table
+        result.extend(block['before_lines'])
+        
+        # Parse and deduplicate the table
+        df = _parse_markdown_table(block['table_lines'])
+        if df is not None and not df.empty:
+            # Convert back to markdown
+            md_lines = _dataframe_to_markdown(df, block['header'])
+            result.extend(md_lines)
+        
+        # Add line after table (if not end of text)
+        if block['after_line'] is not None:
+            result.append(block['after_line'])
+    
+    return "\n".join(result)
+
+
 
 
 def export_tables_to_excel(tables_with_headers):
@@ -699,6 +800,11 @@ if prompt := st.chat_input(placeholder_text):
 
         # Prepend database hint to response
         selected_db = st.session_state.get("selected_database")
+        
+        # Deduplicate the response tables before displaying
+        if response:
+            response = deduplicate_markdown_response(response)
+        
         if selected_db and response:
             response_with_hint = f"📍 **{selected_db}**\n\n{response}"
         else:
