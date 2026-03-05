@@ -203,10 +203,27 @@ def export_tables_to_excel(tables_with_headers):
 
 
 def initialize_production_db():
-    """Download production database from HuggingFace Hub if not present locally."""
+    """Download production database from HuggingFace Hub if not present locally.
+    
+    This function:
+    1. Checks if the database already exists locally (skip download if so)
+    2. Downloads the compressed database from HuggingFace Hub
+    3. Extracts the archive to a temporary directory
+    4. Verifies the SQLite database was extracted correctly
+    5. Moves the database to the final location (CHROMA_DB)
+    
+    The downloaded database contains pre-built Chroma vector collections
+    for all cohort datasets (Betula, SNAC-K, etc.).
+    """
+    # ─ Check if database already exists locally ───────────────────────────────
+    # Skip download if database directory exists and contains files
+    # This prevents unnecessary downloads on subsequent app restarts
     if os.path.exists(CHROMA_DB) and os.listdir(CHROMA_DB):
         return
     
+    # ─ Validate required configuration ─────────────────────────────────────────
+    # Stop immediately if HuggingFace repository ID is not configured
+    # This is a required secret in Streamlit Cloud
     if not HUGGINGFACE_REPO_ID:
         st.error("❌ HUGGINGFACE_REPO_ID not configured. Please contact the maintainer.")
         st.stop()
@@ -214,9 +231,14 @@ def initialize_production_db():
     try:
         from huggingface_hub import hf_hub_download
         
+        # ─ Show download progress to user ──────────────────────────────────────
+        # Create a placeholder that we'll update as the download progresses
         progress_placeholder = st.empty()
         progress_placeholder.info("📥 Downloading production database from HuggingFace Hub...")
         
+        # ─ Download the database zip file ──────────────────────────────────────
+        # Downloads chroma_prod_db.zip from the configured HuggingFace dataset
+        # File is cached in ~/.cache/huggingface to avoid re-downloading
         try:
             zip_path = hf_hub_download(
                 repo_id=HUGGINGFACE_REPO_ID,
@@ -226,56 +248,82 @@ def initialize_production_db():
             )
             logger.info(f"Downloaded database from HuggingFace: {HUGGINGFACE_REPO_ID}")
         except Exception as e:
+            # Handle download errors (network issues, missing file, auth errors, etc.)
             error_msg = f"Failed to download from HuggingFace: {e}"
             logger.error(error_msg)
             progress_placeholder.error(f"❌ {error_msg}")
             st.stop()
         
+        # ─ Extract the downloaded archive ──────────────────────────────────────
+        # Update progress message and create temporary directory for extraction
         progress_placeholder.info("📦 Extracting database...")
         temp_dir = tempfile.mkdtemp()
         
         try:
+            # Extract all files from the zip archive
             with zipfile.ZipFile(zip_path, "r") as zip_ref:
                 zip_ref.extractall(temp_dir)
             
             extracted_contents = os.listdir(temp_dir)
             
-            # Handle both zip structures: with or without top-level chroma_prod_db folder
+            # ─ Handle different zip structures ─────────────────────────────────
+            # The zip file might contain either:
+            # A) Direct contents: chroma.sqlite3, UUID folders, etc. (typical case)
+            # B) Wrapped: A single "chroma_prod_db" folder containing everything
+            #
+            # We need to handle both cases to find the correct source path
             if "chroma_prod_db" in extracted_contents and len(extracted_contents) == 1:
+                # Case B: Zip had a top-level chroma_prod_db wrapper folder
                 source_path = os.path.join(temp_dir, "chroma_prod_db")
             else:
+                # Case A: Zip had direct contents (most common)
                 source_path = temp_dir
             
+            # ─ Verify database integrity ──────────────────────────────────────
+            # The SQLite database file (chroma.sqlite3) must exist
+            # If missing, the zip was corrupted or incompatible
             sqlite_path = os.path.join(source_path, "chroma.sqlite3")
             if not os.path.exists(sqlite_path):
                 error_files = os.listdir(source_path)[:5]
                 progress_placeholder.error(f"❌ Database files corrupted. Found: {error_files}")
                 st.stop()
             
+            # ─ Clean up and move to final location ─────────────────────────────
+            # Remove any old database directory to prevent conflicts
             if os.path.exists(CHROMA_DB):
                 shutil.rmtree(CHROMA_DB)
             
+            # Move the extracted database to its final location
+            # This makes it available to Chroma at CHROMA_DB path
             shutil.move(source_path, CHROMA_DB)
             
+            # ─ Final verification ─────────────────────────────────────────────
+            # Confirm the move was successful by checking for the SQLite file
             if os.path.exists(os.path.join(CHROMA_DB, "chroma.sqlite3")):
                 logger.info("Database extracted and ready")
                 progress_placeholder.success("✅ Database downloaded and ready!")
             else:
+                # Move succeeded but database file is missing (should never happen)
                 progress_placeholder.error("❌ Database extraction failed")
                 st.stop()
                 
         except Exception as e:
+            # Handle zip extraction or file operation errors
             logger.error(f"Extraction failed: {e}")
             progress_placeholder.error(f"❌ Failed to extract: {e}")
             st.stop()
         finally:
+            # ─ Cleanup temporary directory ─────────────────────────────────────
+            # Always remove temp directory, even if an error occurred
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
         
     except ImportError:
+        # Handle missing huggingface_hub package
         st.error("❌ Install huggingface_hub: `pip install huggingface_hub`")
         st.stop()
     except Exception as e:
+        # Catch any other unexpected errors
         logger.error(f"Unexpected error: {e}")
         st.error(f"❌ {e}")
         st.stop()
@@ -382,7 +430,10 @@ def get_relevant_background(query, vectorstore):
         return get_database_description(vectorstore)
 
 def filter_and_organize_context(query, vectorstore):
-    """Retrieve variable definitions relevant to the query."""
+    """Retrieve variable definitions relevant to the query.
+    
+    Returns context with source information for each variable.
+    """
     if vectorstore is None:
         return "", []
     
@@ -395,7 +446,16 @@ def filter_and_organize_context(query, vectorstore):
             if doc.metadata.get("type") == "variable_definitions"
         ]
         
-        context_text = "\n\n---\n\n".join([doc.page_content for doc in var_defs])
+        # Include source information in context
+        context_parts = []
+        for doc in var_defs:
+            source = doc.metadata.get("source", "Unknown")
+            # Remove .xml suffix if present
+            if source.endswith(".xml"):
+                source = source[:-4]
+            context_parts.append(f"[Source: {source}]\n{doc.page_content}")
+        
+        context_text = "\n\n---\n\n".join(context_parts)
         return context_text, var_defs
     except Exception as e:
         logger.error(f"Error retrieving context: {e}")
@@ -579,9 +639,9 @@ if prompt := st.chat_input(placeholder_text):
                 - Then, present the variable information in a markdown table as specified below:
 
                 TABLE - Variables by Content (what they measure):
-                | Variable Name | Label | Categories |
-                |---|---|---|
-                | variable_name | What it measures in plain English | Category values if applicable |
+                | Variable Name | Label | Categories | Source |
+                |---|---|---|---|
+                | variable_name | What it measures in plain English | Category values if applicable | source_file_name |
                 
                 CRITICAL RULES FOR EXTRACTING VARIABLE NAMES:
                 - Column 1: EXTRACT EXACTLY the text that appears after "Variable: " in the source data
@@ -591,6 +651,10 @@ if prompt := st.chat_input(placeholder_text):
                 - EXAMPLE: If you see "Variable: löpnr", MUST write "löpnr" in Column 1
                 - NEVER modify, shorten, or translate the variable name
                 - NEVER invent variable names - only extract exactly what follows "Variable: "
+
+                CRITICAL RULES FOR SOURCE COLUMN:
+                - Column 4: Extract the source from "[Source: filename]" at the start of each variable's data block
+                - Every variable MUST have its source - do not leave this column empty
                 
                 IMPORTANT NOTE ON VARIABLE AVAILABILITY:
                 For information about which cohorts and tables contain these variables, please refer to the Maelstrom catalogue at: https://www.maelstrom-research.org/
@@ -598,11 +662,11 @@ if prompt := st.chat_input(placeholder_text):
                 EXAMPLE OF CORRECT FORMAT:
                 "In SNAC-K, several variables measure basic demographics. Participants are identified by a unique proband number (löpnr). The cohort includes both men and women, tracked through a sex variable. Birth dates are recorded to calculate age.
 
-                | Variable Name | Label | Categories |
-                |---|---|---|
-                | löpnr | Unique participant identifier | N/A (unique ID) |
-                | kön | Participant's biological sex | 1=man, 2=woman |
-                | Birthday | Date of birth for age calculation | Date format |
+                | Variable Name | Label | Categories | Source |
+                |---|---|---|---|
+                | löpnr | Unique participant identifier | N/A (unique ID) | SNAC_K_Baseline |
+                | kön | Participant's biological sex | 1=man, 2=woman | SNAC_K_Baseline |
+                | Birthday | Date of birth for age calculation | Date format | SNAC_K_Baseline |
                 
 
                 Answer:"""
