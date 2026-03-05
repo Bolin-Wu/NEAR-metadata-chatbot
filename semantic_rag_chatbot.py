@@ -270,16 +270,23 @@ def get_available_databases():
     try:
         # Check if the Chroma directory exists
         if not os.path.exists(CHROMA_DB):
-            st.error(f"❌ Chroma directory not found: {CHROMA_DB}")
+            error_msg = f"❌ Chroma directory not found: {CHROMA_DB}"
+            print(error_msg)
+            st.error(error_msg)
             st.stop()
         
         # Verify the directory is not empty
         chroma_contents = os.listdir(CHROMA_DB)
         if not chroma_contents:
-            st.error(f"❌ Chroma directory is empty: {CHROMA_DB}. Download may have failed.")
+            error_msg = f"❌ Chroma directory is empty: {CHROMA_DB}"
+            print(error_msg)
+            st.error(error_msg)
             st.stop()
         
+        print(f"✅ Chroma DB found at {CHROMA_DB} with {len(chroma_contents)} items")
+        
         embeddings = get_embeddings()
+        print("✅ Embeddings loaded")
         
         # Check each known database to see if its collection exists in Chroma
         failed_collections = []
@@ -294,17 +301,29 @@ def get_available_databases():
                 count = vectorstore._collection.count()
                 if count > 0:
                     databases.append(db_name)
+                    print(f"  ✅ {db_name}: {count} documents")
+                else:
+                    print(f"  ⚠️  {db_name}: collection empty (0 docs)")
             except Exception as e:
                 failed_collections.append((db_name, str(e)))
+                print(f"  ❌ {db_name}: {str(e)[:80]}")
         
-        # If no databases found, log what went wrong
-        if not databases and failed_collections:
-            error_details = "\n".join([f"  • {db}: {err}" for db, err in failed_collections[:3]])
-            st.warning(f"⚠️ Could not load collections (showing first 3):\n{error_details}\n\nDEBUG: CHROMA_DB={CHROMA_DB}\nContents: {chroma_contents[:5]}")
+        # If no databases found, log detailed info
+        if not databases:
+            print(f"\n⚠️  WARNING: No databases loaded!")
+            print(f"Failed collections: {len(failed_collections)}")
+            if failed_collections:
+                print("Details:")
+                for db, err in failed_collections[:3]:
+                    print(f"  • {db}: {err[:100]}")
+        else:
+            print(f"\n✅ Successfully loaded {len(databases)} databases: {databases}")
         
         return sorted(databases)
     except Exception as e:
-        st.error(f"❌ Error retrieving databases: {e}")
+        error_msg = f"❌ Error retrieving databases: {e}"
+        print(error_msg)
+        st.error(error_msg)
         return []
 
 # Initialize vectorstore as None (will be set from cache on database selection)
@@ -451,6 +470,24 @@ if "available_databases_loaded" not in st.session_state:
     with st.spinner("Discovering available databases..."):
         st.session_state.available_databases = get_available_databases()
         st.session_state.available_databases_loaded = True
+    
+    # Show diagnostic info if no databases found
+    if not st.session_state.available_databases:
+        st.error("""
+        ❌ **No databases were discovered!**
+        
+        Possible causes:
+        1. Chroma database did not extract correctly
+        2. Collection names mismatch in SQLite
+        3. Embeddings model loading issue
+        
+        **Troubleshooting:**
+        - Click "Try Again" in the sidebar to retry
+        - Check browser console (F12) for error messages
+        - May need to restart the app
+        """)
+        # Also log to console
+        print("⚠️  WARNING: get_available_databases() returned empty list")
 
 # Preload all vectorstores in the background (cache them)
 if not st.session_state.vectorstores_loading and st.session_state.available_databases:
@@ -484,14 +521,6 @@ with st.sidebar:
     # Database selection
     st.subheader("Select Database")
     
-    # Add refresh button
-    col1, col2 = st.columns([3, 1])
-    with col2:
-        if st.button("🔄 Refresh", key="refresh_databases"):
-            st.session_state.available_databases_loaded = False
-            st.session_state.database_load_attempts = 0
-            st.cache_resource.clear()  # Clear Streamlit's resource cache
-            st.rerun()
     
     if st.session_state.available_databases:
         selected_database = st.radio(
