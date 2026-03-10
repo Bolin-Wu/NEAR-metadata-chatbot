@@ -575,6 +575,7 @@ def filter_and_organize_context(query, vectorstore):
 
 
 
+
 # ── Main App ──────────────────────────────────────────────────────────────────
 
 st.title("💬 NEAR Metadata Chatbot")
@@ -729,6 +730,7 @@ if prompt := st.chat_input(placeholder_text):
 
                 # Use unified prompt template for metadata queries with table format
                 prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata.
+CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly provided in VARIABLE DATA below.
 
                 COHORT BACKGROUND:
                 {cohort_background}
@@ -737,7 +739,7 @@ if prompt := st.chat_input(placeholder_text):
 
                 Your task is to answer questions about variables and metadata from this cohort.
 
-                ### VARIABLE DATA:
+                ### VARIABLE DATA (ONLY SOURCE OF TRUTH):
                 {context}
 
                 ### Question from user:
@@ -754,31 +756,61 @@ if prompt := st.chat_input(placeholder_text):
                 |---|---|---|---|
                 | variable_name | What it measures in plain English | Category values if applicable | source_file_name |
                 
-                CRITICAL RULES FOR EXTRACTING VARIABLE NAMES:
-                - Column 1: EXTRACT EXACTLY the text that appears after "Variable: " in the source data
-                - Do NOT use any other field names, labels, or descriptions
-                - Do NOT use text from fields like "Description:" or "Sociodemographic Economic Characteristics:"
-                - EXAMPLE: If you see "Variable: age_HT_rounded", MUST write "age_HT_rounded" in Column 1
-                - EXAMPLE: If you see "Variable: löpnr", MUST write "löpnr" in Column 1
-                - NEVER modify, shorten, or translate the variable name
-                - NEVER invent variable names - only extract exactly what follows "Variable: "
-
-                CRITICAL RULES FOR SOURCE COLUMN:
-                - Column 4: Extract the source from "[Source: filename]" at the start of each variable's data block
-                - Every variable MUST have its source - do not leave this column empty
+                ================================================================
+                CRITICAL RULES FOR EXTRACTING DATA (READ CAREFULLY):
+                ================================================================
                 
+                1. VARIABLE NAMES (Column 1):
+                   - EXTRACT EXACTLY the text that appears after "Variable: " in the source data
+                   - Copy-paste the exact variable name - do NOT modify, shorten, or translate
+                   - Do NOT use field names like "Description" or "Label" instead
+                   - FORBIDDEN: Do NOT invent variable names not in the source
+                   - EXAMPLE RIGHT: Source has "Variable: age_HT_rounded" → Write "age_HT_rounded"
+                   - EXAMPLE RIGHT: Source has "Variable: löpnr" → Write "löpnr" exactly
+                   - EXAMPLE WRONG: Inventing "participant_age" when source only has "löpnr"
+
+                2. LABELS (Column 2):
+                   - Extract the description/label EXACTLY as written in the source
+                   - Use the "Label:" field value from source data
+                   - Keep descriptions concise (1-2 sentences max)
+                   - Do NOT shorten, paraphrase, or interpret the label
+
+                3. CATEGORIES (Column 3):
+                   - Extract category values EXACTLY as written in source (e.g., "1=man, 2=woman")
+                   - If no categories exist, write "N/A (continuous)" or "N/A (unique ID)"
+                   - Do NOT invent category mappings not in the source
+
+                4. SOURCE (Column 4):
+                   - Extract from "[Source: filename]" at the start of each variable block
+                   - Must be present for EVERY variable (required field)
+                   - Use the exact source filename provided
+
+                5. VALIDATION:
+                   - Every row must have all 4 columns filled
+                   - Every variable name must come from the source data
+                   - If data is missing from source, DO NOT hallucinate it
+                   - Double-check: Each variable in your table should be traceable to the source context
+
                 IMPORTANT NOTE ON VARIABLE AVAILABILITY:
                 For information about which cohorts and tables contain these variables, please refer to the Maelstrom catalogue at: https://www.maelstrom-research.org/
                 
-                EXAMPLE OF CORRECT FORMAT:
-                "In SNAC-K, several variables measure basic demographics. Participants are identified by a unique proband number (löpnr). The cohort includes both men and women, tracked through a sex variable. Birth dates are recorded to calculate age.
-
+                DETAILED EXAMPLES OF CORRECT FORMAT:
+                
+                Example 1 - Demographics in SNAC-K:
+                "In SNAC-K, several variables measure basic demographics. Each participant has a unique identifier and recorded biological sex."
+                
                 | Variable Name | Label | Categories | Source |
                 |---|---|---|---|
-                | löpnr | Unique participant identifier | N/A (unique ID) | SNAC_K_Baseline |
+                | löpnr | Unique participant identifier number | N/A (unique ID) | SNAC_K_Baseline |
                 | kön | Participant's biological sex | 1=man, 2=woman | SNAC_K_Baseline |
-                | Birthday | Date of birth for age calculation | Date format | SNAC_K_Baseline |
                 
+                Example 2 - Physical Measurements:
+                "Height and weight are measured at baseline assessment."
+                
+                | Variable Name | Label | Categories | Source |
+                |---|---|---|---|
+                | height_cm | Height in centimeters | N/A (continuous) | H70_Baseline_Form |
+                | weight_kg | Body weight in kilograms | N/A (continuous) | H70_Baseline_Form |
 
                 Answer:"""
 
