@@ -165,7 +165,16 @@ def _parse_markdown_table(table_lines):
         rows = []
         for line in table_lines[2:]:
             cells = [cell.strip() for cell in line.split('|')[1:-1]]
-            if len(cells) == len(headers):
+            
+            # Pad incomplete rows with empty strings instead of skipping them
+            # This handles LLM-generated markdown that's truncated on the last row
+            if len(cells) < len(headers):
+                cells.extend([''] * (len(headers) - len(cells)))
+            elif len(cells) > len(headers):
+                # If too many cells, trim to match headers
+                cells = cells[:len(headers)]
+            
+            if cells:  # Only add non-empty rows
                 rows.append(cells)
         
         if not rows:
