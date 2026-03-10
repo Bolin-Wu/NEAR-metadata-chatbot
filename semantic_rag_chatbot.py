@@ -638,7 +638,7 @@ with st.sidebar:
     if st.session_state.available_databases:
         selected_database = st.radio(
             "Choose a database to query:",
-            options=st.session_state.available_databases,
+            options=sorted(st.session_state.available_databases),
             index=0,
             key="database_radio"
         )
