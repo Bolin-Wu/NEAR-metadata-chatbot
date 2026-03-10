@@ -629,7 +629,7 @@ with st.sidebar:
     if logo_path.exists():
         col1, col2, col3 = st.columns([0.5, 2.5, 0.5])
         with col2:
-            st.image(str(logo_path), use_container_width=True)
+            st.image(str(logo_path), width='stretch')
     st.markdown("---")
     
     # Database selection
