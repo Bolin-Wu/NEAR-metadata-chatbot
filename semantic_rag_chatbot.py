@@ -690,6 +690,10 @@ For more accurate and comprehensive metadata, please check with [Maelstrom catal
 or the NEAR team.
 """)
 
+st.info("""
+**💡 Tip:** If you're not satisfied with the results, try searching again with different wording. The same question may yield different results due to the nature of AI-powered responses.
+""")
+
 # Display search suggestions
 st.markdown("### 💡 Example prompts:")
 col1, col2, col3 = st.columns(3)
