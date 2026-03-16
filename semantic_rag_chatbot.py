@@ -166,13 +166,11 @@ def _parse_markdown_table(table_lines):
         for line in table_lines[2:]:
             cells = [cell.strip() for cell in line.split('|')[1:-1]]
             
-            # Pad incomplete rows with empty strings instead of skipping them
-            # This handles LLM-generated markdown that's truncated on the last row
-            if len(cells) < len(headers):
-                cells.extend([''] * (len(headers) - len(cells)))
-            elif len(cells) > len(headers):
-                # If too many cells, trim to match headers
-                cells = cells[:len(headers)]
+            # Skip incomplete rows entirely (don't pad with empty strings)
+            # With improved LLM instructions, incomplete rows should be rare
+            # If a row doesn't have all columns, skip it to maintain data integrity
+            if len(cells) != len(headers):
+                continue
             
             if cells:  # Only add non-empty rows
                 rows.append(cells)
@@ -764,7 +762,7 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
                 - Use your own words to describe what the variables measure
                 - Then, present the variable information in a markdown table as specified below:
 
-                TABLE - Variables by Content (what they measure):
+                TABLE - Variables by Content:
                 | Variable Name | Label | Categories | Source |
                 |---|---|---|---|
                 | variable_name | What it measures in plain English | Category values if applicable | source_file_name |
@@ -798,14 +796,16 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
                    - Must be present for EVERY variable (required field)
                    - Use the exact source filename provided
 
-                5. VALIDATION:
-                   - Every row must have all 4 columns filled
+                5. VALIDATION (CRITICAL - MUST FOLLOW):
+                   - EVERY row must have ALL 4 columns completely filled (NO EMPTY CELLS)
+                   - If you cannot fill all 4 columns for a row, OMIT that row entirely
+                   - NEVER create incomplete rows or truncate table rows
+                   - NEVER pad rows with empty cells or partial data
                    - Every variable name must come from the source data
                    - If data is missing from source, DO NOT hallucinate it
                    - Double-check: Each variable in your table should be traceable to the source context
-
-                IMPORTANT NOTE ON VARIABLE AVAILABILITY:
-                For information about which cohorts and tables contain these variables, please refer to the Maelstrom catalogue at: https://www.maelstrom-research.org/
+                   - Before you finish, verify: scan the entire table and confirm NO ROWS have empty cells
+                   - If the last row is incomplete, DELETE IT and end the table cleanly
                 
                 DETAILED EXAMPLES OF CORRECT FORMAT:
                 
@@ -877,7 +877,7 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
             st.download_button(
                 label=f"📥 Download as Excel ({len(tables_with_headers)} table{'s' if len(tables_with_headers) > 1 else ''})",
                 data=excel_file,
-                file_name=f"near_metadata_{st.session_state.selected_database}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                file_name=f"NEARchatbot_{st.session_state.selected_database}_{pd.Timestamp.now().strftime('%y%m%d_%H%M%S')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="download_tables"
             )
