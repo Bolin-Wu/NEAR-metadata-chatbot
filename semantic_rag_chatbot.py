@@ -760,9 +760,8 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
                 - Group related variables by theme
                 - Start with a clear, natural explanation of the topic based on the related cohort background
                 - Use your own words to describe what the variables measure
-                - Then, present the variable information in a markdown table as specified below:
-
-                TABLE - Variables by Content:
+                - Then, present the variable information in a markdown table with these columns:
+                
                 | Variable Name | Label | Categories | Source |
                 |---|---|---|---|
                 | variable_name | What it measures in plain English | Category values if applicable | source_file_name |
