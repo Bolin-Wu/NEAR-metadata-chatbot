@@ -12,7 +12,8 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
-from langchain_groq import ChatGroq  
+from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI  # For xAI Grok
 from langchain_core.prompts import PromptTemplate
 from dotenv import load_dotenv
 import shutil
@@ -42,11 +43,16 @@ KNOWN_DATABASES = [
     "OCTO-Twin", "SATSA", "SNAC-B", "SNAC-K", "SNAC-N", "SWEOLD"
 ]
 
-# Safe way to get API key
+# Safe way to get API keys
 try:
     GROQ_API_KEY = st.secrets["GROQ_api_key"]
 except (FileNotFoundError, KeyError, AttributeError):
     GROQ_API_KEY = os.getenv("GROQ_api_key")
+
+try:
+    XAI_api_key = st.secrets["XAI_api_key"]
+except (FileNotFoundError, KeyError, AttributeError):
+    XAI_api_key = os.getenv("XAI_api_key")
 
 # Cloud storage URL for production vector database (optional)
 # Use HuggingFace Hub: huggingface_hub.download() with repo_id
@@ -77,12 +83,14 @@ def _find_table_blocks(text):
     
     for i, original_line in enumerate(lines):
         line = original_line.strip()
+        is_header = False
         
         # Look for header (non-table text followed by table)
         if line and not line.startswith('|') and i + 1 < len(lines):
             next_line = lines[i + 1].strip()
             if next_line.startswith('|'):
                 last_header = original_line
+                is_header = True
         
         # Check if this is a table line
         if line.startswith('|') and line.endswith('|'):
@@ -99,7 +107,8 @@ def _find_table_blocks(text):
                 current_table = []
                 last_header = None
                 before_lines = []
-            else:
+            elif not is_header:
+                # Don't add to before_lines if this line will be used as header
                 before_lines.append(original_line)
     
     # Handle final table if present
@@ -257,7 +266,6 @@ def deduplicate_markdown_response(text):
 
 
 
-
 def export_tables_to_excel(tables_with_headers):
     """Export multiple DataFrames to Excel file with formatted sheets.
     
@@ -272,7 +280,12 @@ def export_tables_to_excel(tables_with_headers):
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         for idx, (header, df) in enumerate(tables_with_headers):
             # Create sheet name from header (max 31 chars for Excel)
-            sheet_name = header[:31] if header else f"Table {idx + 1}"
+            # Remove markdown formatting (remove leading ### or ##, etc)
+            if header:
+                clean_header = re.sub(r'^#+\s*', '', header).strip()
+                sheet_name = clean_header[:31] if clean_header else f"Table {idx + 1}"
+            else:
+                sheet_name = f"Table {idx + 1}"
             # Sanitize sheet name (remove invalid characters)
             sheet_name = re.sub(r'[\\/:*?"<>|]', '_', sheet_name)
             
@@ -504,6 +517,10 @@ if "vectorstores_cache" not in st.session_state:
 if "latest_tables_with_headers" not in st.session_state:
     st.session_state.latest_tables_with_headers = []
 
+# Initialize selected LLM model
+if "selected_llm_model" not in st.session_state:
+    st.session_state.selected_llm_model = "Groq (Llama 3.1 8B)"
+
 def get_database_description(vectorstore):
     """Retrieve database description from the vector store."""
     if vectorstore is None:
@@ -579,6 +596,35 @@ def filter_and_organize_context(query, vectorstore):
         logger.error(f"Error retrieving context: {e}")
         st.error(f"Error retrieving context: {e}")
         return "", []
+
+def get_llm(model_name: str):
+    """Initialize the selected LLM model.
+    
+    Args:
+        model_name: Name of the model to initialize
+    
+    Returns:
+        Initialized LLM instance
+    """
+    if model_name == "Grok 4.1 Fast":
+        if not XAI_api_key:
+            st.error("❌ XAI_api_key not configured")
+            st.stop()
+        return ChatOpenAI(
+            api_key=XAI_api_key,
+            model="grok-4-1-fast-non-reasoning",
+            base_url="https://api.x.ai/v1",
+            temperature=0.1,
+        )
+    else:  # Default to Groq Llama 3.1 8B
+        if not GROQ_API_KEY:
+            st.error("❌ GROQ_api_key not configured")
+            st.stop()
+        return ChatGroq(
+            groq_api_key=GROQ_API_KEY,
+            model_name="llama-3.1-8b-instant",
+            temperature=0.1,
+        )
 
 
 
@@ -664,6 +710,24 @@ with st.sidebar:
     
     st.markdown("---")
     
+    # LLM Model Selection
+    st.subheader("LLM Model Selection")
+    available_models = ["Groq (Llama 3.1 8B)", "Grok 4.1 Fast"]
+    selected_model = st.radio(
+        "Choose LLM model:",
+        options=available_models,
+        index=0,
+        key="llm_radio"
+    )
+    st.session_state.selected_llm_model = selected_model
+    
+    if selected_model == "Grok 4.1 Fast":
+        st.caption("⚡ Testing: Grok 4.1 Fast (XAI)")
+    else:
+        st.caption("✅ Current: Llama 3.1 8B (Groq)")
+    
+    st.markdown("---")
+    
     # Contact & Support
     st.subheader("Contact & Support")
     st.markdown("""
@@ -729,11 +793,11 @@ if prompt := st.chat_input(placeholder_text):
             response = ""
         else:
             with st.spinner("Thinking..."):
-                llm = ChatGroq(
-                    groq_api_key=GROQ_API_KEY,
-                    model_name="llama-3.1-8b-instant",
-                    temperature=0.1,
-                )
+                # Get the selected LLM model
+                llm = get_llm(st.session_state.selected_llm_model)
+                
+                # Display which model is being used
+                st.caption(f"🔧 Using: {st.session_state.selected_llm_model}")
                 
                 # Get context (already filtered to selected database via collection)
                 # Returns both context text and document list
@@ -789,6 +853,8 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
                    - Extract category values EXACTLY as written in source (e.g., "1=man, 2=woman")
                    - If no categories exist, write "N/A (continuous)" or "N/A (unique ID)"
                    - Do NOT invent category mappings not in the source
+                   - If values span multiple lines in source, include them all in one cell
+                   - Do NOT use HTML tags like <br> or newlines within cells - keep each row as one line
 
                 4. SOURCE (Column 4):
                    - Extract from "[Source: filename]" at the start of each variable block
@@ -844,6 +910,7 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
 
                 try:
                     response = rag_chain.invoke(prompt)
+                    logger.info(f"LLM Response (first 500 chars): {response[:500]}")  # Debug log
                 except Exception as e:
                     if "rate_limit" in str(e).lower() or "429" in str(e):
                         st.error("⚠️ Rate limit reached. Please try again in a few moments.")
@@ -855,7 +922,7 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
         # Prepend database hint to response
         selected_db = st.session_state.get("selected_database")
         
-        # Deduplicate the response tables before displaying
+        # Deduplicate response tables
         if response:
             response = deduplicate_markdown_response(response)
         

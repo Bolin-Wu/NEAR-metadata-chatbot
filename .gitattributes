@@ -1,0 +1,22 @@
+# Normalize line endings for all files
+* text=auto
+
+# Python files - use LF
+*.py text eol=lf
+*.toml text eol=lf
+*.txt text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.xml text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# Lock files - use LF
+*.lock text eol=lf
+
+# Binary files
+*.sqlite3 binary
+*.db binary
+*.xlsx binary
+*.png binary
+*.jpg binary
