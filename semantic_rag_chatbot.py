@@ -614,7 +614,7 @@ def get_llm(model_name: str):
             api_key=XAI_api_key,
             model="grok-4-1-fast-non-reasoning",
             base_url="https://api.x.ai/v1",
-            temperature=0.1,
+            temperature=0.2,
         )
     else:  # Default to Groq Llama 3.1 8B
         if not GROQ_API_KEY:
@@ -623,7 +623,7 @@ def get_llm(model_name: str):
         return ChatGroq(
             groq_api_key=GROQ_API_KEY,
             model_name="llama-3.1-8b-instant",
-            temperature=0.1,
+            temperature=0.2,
         )
 
 
@@ -753,7 +753,7 @@ or the NEAR team.
 """)
 
 st.info("""
-**💡 Tip:** If you're not satisfied with the results, try searching again with different wording. The similar question may yield different results due to the nature of AI-powered responses.
+**💡 Tip:** If you're not satisfied with the results, try searching again with different wording or AI model. The similar question may yield different results due to the nature of AI-powered responses.
 """)
 
 # Display search suggestions
@@ -839,8 +839,8 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
                    - Copy-paste the exact variable name - do NOT modify, shorten, or translate
                    - Do NOT use field names like "Description" or "Label" instead
                    - FORBIDDEN: Do NOT invent variable names not in the source
-                   - EXAMPLE RIGHT: Source has "Variable: age_HT_rounded" → Write "age_HT_rounded"
-                   - EXAMPLE RIGHT: Source has "Variable: löpnr" → Write "löpnr" exactly
+                   - EXAMPLE RIGHT: Source has "Variable: age_HT_rounded". Write "age_HT_rounded"
+                   - EXAMPLE RIGHT: Source has "Variable: löpnr". Write "löpnr" exactly
                    - EXAMPLE WRONG: Inventing "participant_age" when source only has "löpnr"
 
                 2. LABELS (Column 2):
@@ -850,10 +850,10 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
                    - Do NOT shorten, paraphrase, or interpret the label
 
                 3. CATEGORIES (Column 3):
-                   - Extract category values EXACTLY as written in source (e.g., "1=man, 2=woman")
-                   - If no categories exist, write "N/A (continuous)" or "N/A (unique ID)"
+                   - Extract category values EXACTLY as written in source
+                   - FORMAT STRICTLY as: "1=value1, 2=value2, 3=value3" (number=description, comma-separated, NO SEMICOLONS)
+                   - If no categories exist, write "N/A"
                    - Do NOT invent category mappings not in the source
-                   - If values span multiple lines in source, include them all in one cell
                    - Do NOT use HTML tags like <br> or newlines within cells - keep each row as one line
 
                 4. SOURCE (Column 4):
@@ -863,8 +863,6 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
 
                 5. VALIDATION (CRITICAL - MUST FOLLOW):
                    - EVERY row must have ALL 4 columns completely filled (NO EMPTY CELLS)
-                   - If you cannot fill all 4 columns for a row, OMIT that row entirely
-                   - NEVER create incomplete rows or truncate table rows
                    - NEVER pad rows with empty cells or partial data
                    - Every variable name must come from the source data
                    - If data is missing from source, DO NOT hallucinate it
@@ -879,7 +877,7 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
                 
                 | Variable Name | Label | Categories | Source |
                 |---|---|---|---|
-                | löpnr | Unique participant identifier number | N/A (unique ID) | SNAC_K_Baseline |
+                | löpnr | Unique participant identifier number | N/A | SNAC_K_Baseline |
                 | kön | Participant's biological sex | 1=man, 2=woman | SNAC_K_Baseline |
                 
                 Example 2 - Physical Measurements:
@@ -887,8 +885,8 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
                 
                 | Variable Name | Label | Categories | Source |
                 |---|---|---|---|
-                | height_cm | Height in centimeters | N/A (continuous) | H70_Baseline_Form |
-                | weight_kg | Body weight in kilograms | N/A (continuous) | H70_Baseline_Form |
+                | height_cm | Height in centimeters | N/A | H70_Baseline_Form |
+                | weight_kg | Body weight in kilograms | N/A | H70_Baseline_Form |
 
                 Answer:"""
 
