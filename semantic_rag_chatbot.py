@@ -21,8 +21,8 @@ import zipfile
 
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging (set to WARNING for production, INFO/DEBUG for development)
+logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -42,6 +42,21 @@ KNOWN_DATABASES = [
     "Betula", "GAS_SNAC_S", "GENDER", "H70", "KP", 
     "OCTO-Twin", "SATSA", "SNAC-B", "SNAC-K", "SNAC-N", "SWEOLD"
 ]
+
+# LLM Model Names (for consistency across the app)
+LLM_MODEL_GROQ = "Groq (Llama 3.1 8B)"
+LLM_MODEL_GROK = "Grok 4.1 Fast Reasoning"
+
+# LLM Model IDs (technical identifiers for API calls)
+GROQ_MODEL_ID = "llama-3.1-8b-instant"
+GROK_MODEL_ID = "grok-4-1-fast-reasoning"
+
+# LLM Hyperparameters
+LLM_TEMPERATURE = 0.2           # Deterministic, precise responses (0.0=deterministic, 1.0=creative)
+
+# Retrieval Parameters
+RETRIEVAL_K_BACKGROUND = 5      # Top-5 docs for cohort background context
+RETRIEVAL_K_CONTEXT = 30        # Top-30 docs for variable definitions (increased for better category capture)
 
 # Safe way to get API keys
 try:
@@ -189,23 +204,8 @@ def _parse_markdown_table(table_lines):
         
         df = pd.DataFrame(rows, columns=headers)
         
-        # Remove rows with empty critical columns (prevent incomplete entries)
-        # Keep only rows where Variable Name, Label, and Categories are non-empty
-        critical_cols = [col for col in ['Variable Name', 'Label', 'Categories'] if col in df.columns]
-        if critical_cols:
-            # Filter rows where all critical columns have non-empty values
-            df = df[df[critical_cols].apply(lambda row: all(val and str(val).strip() for val in row), axis=1)]
-        
         if df.empty:
             return None
-        
-        # Deduplicate rows with identical Label and Categories
-        # Variables with the same label and categories are considered duplicates
-        # Keep only the first occurrence (first source file)
-        # This makes the export more succinct for reference purposes
-        subset_cols = [col for col in ['Label', 'Categories'] if col in df.columns]
-        if subset_cols:
-            df = df.drop_duplicates(subset=subset_cols, keep='first')
         
         return df
     except Exception as e:
@@ -520,7 +520,7 @@ if "latest_tables_with_headers" not in st.session_state:
 
 # Initialize selected LLM model
 if "selected_llm_model" not in st.session_state:
-    st.session_state.selected_llm_model = "Groq (Llama 3.1 8B)"
+    st.session_state.selected_llm_model = LLM_MODEL_GROQ
 
 def get_database_description(vectorstore):
     """Retrieve database description from the vector store."""
@@ -547,7 +547,7 @@ def get_relevant_background(query, vectorstore):
     
     try:
         # Perform semantic search on the entire collection
-        retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+        retriever = vectorstore.as_retriever(search_kwargs={"k": RETRIEVAL_K_BACKGROUND})
         docs = retriever.invoke(query)
         
         background_docs = [
@@ -574,13 +574,18 @@ def filter_and_organize_context(query, vectorstore):
         return "", []
     
     try:
-        retriever = vectorstore.as_retriever(search_kwargs={"k": 20})
+        # Increase retrieval depth to capture more complete category information
+        # especially for broader queries like "recommend variables for CIRS"
+        retriever = vectorstore.as_retriever(search_kwargs={"k": RETRIEVAL_K_CONTEXT})
         docs = retriever.invoke(query)
         
         var_defs = [
             doc for doc in docs 
             if doc.metadata.get("type") == "variable_definitions"
         ]
+        
+        # Debug logging: show how many documents were retrieved
+        logger.debug(f"Query: '{query}' | Retrieved {len(docs)} total docs | {len(var_defs)} are variable definitions")
         
         # Include source information in context
         context_parts = []
@@ -592,10 +597,13 @@ def filter_and_organize_context(query, vectorstore):
             context_parts.append(f"[Source: {source}]\n{doc.page_content}")
         
         context_text = "\n\n---\n\n".join(context_parts)
+        logger.debug(f"Final context: {len(context_parts)} variable definitions included ({len(context_text)} chars)")
         return context_text, var_defs
     except Exception as e:
-        logger.error(f"Error retrieving context: {e}")
-        st.error(f"Error retrieving context: {e}")
+        error_msg = f"Error retrieving context: {e}"
+        logger.error(error_msg)
+        logger.exception("Full traceback:")
+        # Note: Don't show error in UI here since this is called during response generation
         return "", []
 
 def get_llm(model_name: str):
@@ -607,15 +615,15 @@ def get_llm(model_name: str):
     Returns:
         Initialized LLM instance
     """
-    if model_name == "Grok 4.1 Fast":
+    if model_name == LLM_MODEL_GROK:
         if not XAI_api_key:
             st.error("❌ XAI_api_key not configured")
             st.stop()
         return ChatOpenAI(
             api_key=XAI_api_key,
-            model="grok-4-1-fast-non-reasoning",
+            model=GROK_MODEL_ID,
             base_url="https://api.x.ai/v1",
-            temperature=0.2,
+            temperature=LLM_TEMPERATURE,
         )
     else:  # Default to Groq Llama 3.1 8B
         if not GROQ_API_KEY:
@@ -623,8 +631,8 @@ def get_llm(model_name: str):
             st.stop()
         return ChatGroq(
             groq_api_key=GROQ_API_KEY,
-            model_name="llama-3.1-8b-instant",
-            temperature=0.2,
+            model_name=GROQ_MODEL_ID,
+            temperature=LLM_TEMPERATURE,
         )
 
 
@@ -713,7 +721,7 @@ with st.sidebar:
     
     # LLM Model Selection
     st.subheader("LLM Model Selection")
-    available_models = ["Groq (Llama 3.1 8B)", "Grok 4.1 Fast"]
+    available_models = [LLM_MODEL_GROQ, LLM_MODEL_GROK]
     selected_model = st.radio(
         "Choose LLM model:",
         options=available_models,
@@ -722,8 +730,8 @@ with st.sidebar:
     )
     st.session_state.selected_llm_model = selected_model
     
-    if selected_model == "Grok 4.1 Fast":
-        st.caption("⚡ Testing: Grok 4.1 Fast (XAI)")
+    if selected_model == LLM_MODEL_GROK:
+        st.caption(f"⚡ Testing: {LLM_MODEL_GROK} (XAI)")
     else:
         st.caption("✅ Current: Llama 3.1 8B (Groq)")
     
@@ -845,9 +853,7 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
                    - EXAMPLE WRONG: Inventing "participant_age" when source only has "löpnr"
 
                 2. LABELS (Column 2):
-                   - Extract the description/label EXACTLY as written in the source
-                   - Use the "Label:" field value from source data
-                   - Keep descriptions concise (1-2 sentences max)
+                   - Use the "Label:" field value EXACTLY as written in source data
                    - Do NOT shorten, paraphrase, or interpret the label
 
                 3. CATEGORIES (Column 3):
@@ -861,14 +867,19 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
                    - Extract from "[Source: filename]" at the start of each variable block
                    - Must be present for EVERY variable (required field)
                    - Use the exact source filename provided
+                   - If the same variable (identical Label and Categories) appears in multiple source files (e.g., different waves/follow-ups), combine them into ONE row with comma-separated sources: "Wave1_Baseline, Wave2_FollowUp"
 
-                5. VALIDATION (CRITICAL - MUST FOLLOW):
+                5. DEDUPLICATION:
+                   - Variables with identical Label and Categories are the same variable collected across different time points
+                   - COMBINES these into a single row with all variable names and sources listed
+                   - This provides visibility into data collection across waves while avoiding redundancy
+
+                6. VALIDATION (CRITICAL - MUST FOLLOW):
                    - EVERY row must have ALL 4 columns completely filled (NO EMPTY CELLS)
                    - NEVER pad rows with empty cells or partial data
                    - Every variable name must come from the source data
                    - If data is missing from source, DO NOT hallucinate it
                    - Double-check: Each variable in your table should be traceable to the source context
-                   - Before you finish, verify: scan the entire table and confirm NO ROWS have empty cells
                    - If the last row is incomplete, DELETE IT and end the table cleanly
                 
                 DETAILED EXAMPLES OF CORRECT FORMAT:
@@ -908,9 +919,14 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
                 )
 
                 try:
+                    logger.debug(f"Starting LLM invocation with query: {prompt[:100]}...")
+                    logger.debug(f"Context length: {len(context)} chars, {len(context_docs)} docs")
                     response = rag_chain.invoke(prompt)
-                    logger.info(f"LLM Response (first 500 chars): {response[:500]}")  # Debug log
+                    logger.debug(f"LLM Response received (first 500 chars): {response[:500]}")
                 except Exception as e:
+                    error_str = str(e)
+                    logger.error(f"LLM Error: {error_str}")
+                    logger.exception("Full exception traceback:")
                     if "rate_limit" in str(e).lower() or "429" in str(e):
                         st.error("⚠️ Rate limit reached. Please try again in a few moments.")
                         response = "I'm temporarily unavailable due to high usage. Please try again shortly."
