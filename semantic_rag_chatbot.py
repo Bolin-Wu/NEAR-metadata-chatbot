@@ -232,17 +232,18 @@ def extract_markdown_tables(text):
     return tables_with_headers
 
 
-def deduplicate_markdown_response(text):
-    """Remove duplicate table rows from markdown response and reconstruct.
+def normalize_markdown_tables(text):
+    """Parse, validate, deduplicate, and reconstruct markdown tables.
     
-    Extracts tables, deduplicates them, and reconstructs the markdown
-    with deduplicated tables. Non-table content is preserved as-is.
+    Extracts tables from markdown, parses them into DataFrames, deduplicates
+    rows by Label and Categories, filters out incomplete entries, and rebuilds
+    clean markdown output. Non-table content is preserved as-is.
     
     Args:
         text: String containing markdown with tables
     
     Returns:
-        String with deduplicated tables
+        String with normalized (deduplicated and validated) tables
     """
     blocks = _find_table_blocks(text)
     result = []
@@ -920,9 +921,9 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
         # Prepend database hint to response
         selected_db = st.session_state.get("selected_database")
         
-        # Deduplicate response tables
+        # Normalize response tables (parse, deduplicate, validate)
         if response:
-            response = deduplicate_markdown_response(response)
+            response = normalize_markdown_tables(response)
         
         if selected_db and response:
             response_with_hint = f"📍 **{selected_db}**\n\n{response}"
