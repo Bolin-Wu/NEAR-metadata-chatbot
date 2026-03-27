@@ -747,9 +747,9 @@ with st.sidebar:
     st.session_state.selected_llm_model = selected_model
     
     if selected_model == LLM_MODEL_GROK:
-        st.caption(f"⚡ Testing: {LLM_MODEL_GROK} (XAI)")
+        st.caption(f"💪 Supports larger context, may take slightly longer")
     else:
-        st.caption("✅ Current: Llama 3.1 8B (Groq)")
+        st.caption("⚡ Faster responses, optimized for common queries")
     
     st.markdown("---")
     
