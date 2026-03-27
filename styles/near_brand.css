@@ -149,3 +149,16 @@ button svg * {
   fill: #ffffff !important;
   stroke: #ffffff !important;
 }
+
+/* Target all SVG elements globally to catch toolbar icons */
+svg {
+  color: #ffffff !important;
+  fill: #ffffff !important;
+  stroke: #ffffff !important;
+}
+
+svg * {
+  color: #ffffff !important;
+  fill: #ffffff !important;
+  stroke: #ffffff !important;
+}
