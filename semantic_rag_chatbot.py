@@ -33,6 +33,16 @@ st.set_page_config(
     menu_items=None
 )
 
+# ── Custom Styling (NEAR Brand) ───────────────────────────────────────────────
+# Load external CSS file for clean separation of concerns
+css_file = Path("styles/near_brand.css")
+if css_file.exists():
+    with open(css_file, "r") as f:
+        css_content = f.read()
+    st.markdown(f"<style>{css_content}</style>", unsafe_allow_html=True)
+else:
+    logger.warning(f"CSS file not found at {css_file}. Styling may not be applied.")
+
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 CHROMA_DB = "./chroma_prod_db"          # Production database (cloud storage)
 DATA_ROOT = "./data"
@@ -57,6 +67,7 @@ LLM_TEMPERATURE = 0.2           # Deterministic, precise responses (0.0=determin
 # Retrieval Parameters
 RETRIEVAL_K_BACKGROUND = 5      # Top-5 docs for cohort background context
 RETRIEVAL_K_CONTEXT = 30        # Top-30 docs for variable definitions (increased for better category capture)
+RETRIEVAL_K_CONTEXT_GROQ = 15   # Reduced for Groq free tier to stay within 6000 TPM token limit
 
 # Safe way to get API keys
 try:
@@ -565,7 +576,7 @@ def get_relevant_background(query, vectorstore):
         logger.error(f"Error retrieving background: {e}")
         return get_database_description(vectorstore)
 
-def filter_and_organize_context(query, vectorstore):
+def filter_and_organize_context(query, vectorstore, llm_model=None):
     """Retrieve variable definitions relevant to the query.
     
     Returns context with source information for each variable.
@@ -574,9 +585,14 @@ def filter_and_organize_context(query, vectorstore):
         return "", []
     
     try:
+        # Adjust retrieval depth based on LLM model to stay within token limits
+        k_context = RETRIEVAL_K_CONTEXT
+        if llm_model == LLM_MODEL_GROQ:
+            k_context = RETRIEVAL_K_CONTEXT_GROQ  # Reduced for free tier
+        
         # Increase retrieval depth to capture more complete category information
         # especially for broader queries like "recommend variables for CIRS"
-        retriever = vectorstore.as_retriever(search_kwargs={"k": RETRIEVAL_K_CONTEXT})
+        retriever = vectorstore.as_retriever(search_kwargs={"k": k_context})
         docs = retriever.invoke(query)
         
         var_defs = [
@@ -585,7 +601,7 @@ def filter_and_organize_context(query, vectorstore):
         ]
         
         # Debug logging: show how many documents were retrieved
-        logger.debug(f"Query: '{query}' | Retrieved {len(docs)} total docs | {len(var_defs)} are variable definitions")
+        logger.debug(f"Query: '{query}' | Retrieved {len(docs)} total docs | {len(var_defs)} are variable definitions | Model: {llm_model}")
         
         # Include source information in context
         context_parts = []
@@ -810,7 +826,7 @@ if prompt := st.chat_input(placeholder_text):
                 
                 # Get context (already filtered to selected database via collection)
                 # Returns both context text and document list
-                context, context_docs = filter_and_organize_context(prompt, vectorstore)
+                context, context_docs = filter_and_organize_context(prompt, vectorstore, st.session_state.selected_llm_model)
 
                 # Use unified prompt template for metadata queries with table format
                 prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata.
@@ -921,13 +937,19 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
                 try:
                     logger.debug(f"Starting LLM invocation with query: {prompt[:100]}...")
                     logger.debug(f"Context length: {len(context)} chars, {len(context_docs)} docs")
+                    logger.debug(f"Using model: {st.session_state.selected_llm_model}")
                     response = rag_chain.invoke(prompt)
                     logger.debug(f"LLM Response received (first 500 chars): {response[:500]}")
                 except Exception as e:
                     error_str = str(e)
                     logger.error(f"LLM Error: {error_str}")
                     logger.exception("Full exception traceback:")
-                    if "rate_limit" in str(e).lower() or "429" in str(e):
+                    
+                    # Check for token limit exceeded error
+                    if "rate_limit_exceeded" in error_str and "tokens" in error_str.lower():
+                        st.error("⚠️ Request too large for Groq free tier. Try asking about a smaller subset of variables or use the Grok model instead.")
+                        response = "Your query resulted in too much context data for the Groq free tier. Please try asking about a subset of variables, or switch to the Grok model which has higher token limits."
+                    elif "rate_limit" in str(e).lower() or "429" in str(e):
                         st.error("⚠️ Rate limit reached. Please try again in a few moments.")
                         response = "I'm temporarily unavailable due to high usage. Please try again shortly."
                     else:

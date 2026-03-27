@@ -1,0 +1,137 @@
+/* NEAR Brand Styling for Streamlit Chatbot */
+/* Color Palette: Sage greens, grays, forest accents */
+
+/* NEAR Brand Color Palette */
+:root {
+  --near-primary: #7ba74f; /* Lighter sage green */
+  --near-dark-green: #4c633a; /* Dark forest green */
+  --near-light-green: #a9b59f; /* Light sage accent */
+  --near-dark-gray: #595959; /* Text color */
+  --near-light-gray: #ececec; /* Light background */
+}
+
+/* Main title and headings */
+h1 {
+  color: var(--near-dark-gray) !important;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+
+h2,
+h3 {
+  color: var(--near-dark-gray) !important;
+  font-weight: 600;
+  margin-top: 1.5rem;
+}
+
+/* Body text */
+body,
+p {
+  color: var(--near-dark-gray);
+}
+
+/* Links */
+a {
+  color: var(--near-primary) !important;
+}
+
+a:hover {
+  color: var(--near-dark-green) !important;
+  text-decoration: underline;
+}
+
+/* Sidebar styling */
+section[data-testid="sidebar"] {
+  background-color: #ffffff;
+  border-right: 2px solid var(--near-light-gray);
+}
+
+section[data-testid="sidebar"] h2 {
+  color: var(--near-dark-green) !important;
+  border-bottom: 2px solid var(--near-primary);
+  padding-bottom: 0.5rem;
+}
+
+/* Button styling */
+button {
+  background-color: var(--near-primary) !important;
+  color: #ffffff !important;
+  border-radius: 6px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+button * {
+  color: #ffffff !important;
+}
+
+button:hover {
+  background-color: var(--near-dark-green) !important;
+  box-shadow: 0 2px 8px rgba(78, 99, 58, 0.2);
+}
+
+/* Radio button styling (database selection, LLM model selection) */
+[data-testid="radiogroup"] label {
+  color: var(--near-dark-gray) !important;
+}
+
+/* Table styling (markdown tables) */
+table {
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+
+table thead {
+  background-color: var(--near-primary);
+  color: white;
+}
+
+table th {
+  color: white;
+  padding: 0.75rem;
+  font-weight: 600;
+  text-align: left;
+}
+
+table td {
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--near-light-gray);
+  color: var(--near-dark-gray);
+}
+
+table tbody tr:hover {
+  background-color: rgba(110, 143, 83, 0.05);
+}
+
+/* Chat message styling */
+.stChatMessage {
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+/* Caption (small helper text) */
+caption,
+.stCaption {
+  color: var(--near-dark-gray);
+  font-size: 0.85rem;
+}
+
+/* Subheader */
+.stSubheader {
+  color: var(--near-dark-green) !important;
+}
+
+/* Warning, info, success boxes */
+.stAlert {
+  border-radius: 8px;
+  /* background-color: var(--near-light-green) !important; */
+}
+
+/* Download button */
+[data-testid="stDownloadButton"] button {
+  background-color: var(--near-primary) !important;
+}
+
+[data-testid="stDownloadButton"] button:hover {
+  background-color: var(--near-dark-green) !important;
+}
