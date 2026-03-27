@@ -54,8 +54,8 @@ KNOWN_DATABASES = [
 ]
 
 # LLM Model Names (for consistency across the app)
-LLM_MODEL_GROQ = "Groq (Llama 3.1 8B)"
-LLM_MODEL_GROK = "Grok 4.1 Fast Reasoning"
+LLM_MODEL_GROQ = "Llama 3.1 8B (Groq)"
+LLM_MODEL_GROK = "Grok 4.1 Fast Reasoning (xAI)"
 
 # LLM Model IDs (technical identifiers for API calls)
 GROQ_MODEL_ID = "llama-3.1-8b-instant"
