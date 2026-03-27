@@ -656,7 +656,7 @@ def get_llm(model_name: str):
 
 # ── Main App ──────────────────────────────────────────────────────────────────
 
-st.title("💬 NEAR Metadata Chatbot")
+st.title("NEAR Metadata Chatbot")
 
 # Verify HUGGINGFACE_REPO_ID is available before initializing database
 if not HUGGINGFACE_REPO_ID:
@@ -702,7 +702,7 @@ if not st.session_state.vectorstores_loading and st.session_state.available_data
                     st.warning(f"Could not preload {db}: {e}")
         st.session_state.vectorstores_loading = False
 
-# Add logo and controls to sidebar
+# Add controls to sidebar
 with st.sidebar:
     logo_path = Path("logo/NEAR-chatbot.jpg")
     if logo_path.exists():
@@ -770,15 +770,11 @@ with st.sidebar:
         - **Search History**: Track previous searches
         """)
 
-# Add disclaimer about reference information
+# Add disclaimer and tip about reference information
 st.info("""
-**ℹ️ Disclaimer:** The information provided here is for a quick overview only. 
-For more accurate and comprehensive metadata, please check with [Maelstrom catalogue](https://www.maelstrom-research.org/search#lists?type=studies&query=network(in(Mica_network.id,near)),variable(limit(0,20)),study(in(Mica_study.className,Study),limit(0,20))) 
-or the NEAR team.
-""")
+**ℹ️ Disclaimer:** The information provided here is for a quick overview only. For more accurate and comprehensive metadata, please check with [Maelstrom catalogue](https://www.maelstrom-research.org/search#lists?type=studies&query=network(in(Mica_network.id,near)),variable(limit(0,20)),study(in(Mica_study.className,Study),limit(0,20))) or the NEAR team.
 
-st.info("""
-**💡 Tip:** If you're not satisfied with the results, try searching again with different wording or AI model. The similar question may yield different results due to the nature of AI-powered responses.
+**💡 Tip:** If you're not satisfied with the results, try searching again with different wording or switch AI models. The same question may yield different results due to the nature of AI-powered responses.
 """)
 
 # Display search suggestions
@@ -864,7 +860,6 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
                    - Copy-paste the exact variable name - do NOT modify, shorten, or translate
                    - Do NOT use field names like "Description" or "Label" instead
                    - FORBIDDEN: Do NOT invent variable names not in the source
-                   - EXAMPLE RIGHT: Source has "Variable: age_HT_rounded". Write "age_HT_rounded"
                    - EXAMPLE RIGHT: Source has "Variable: löpnr". Write "löpnr" exactly
                    - EXAMPLE WRONG: Inventing "participant_age" when source only has "löpnr"
 
