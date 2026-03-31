@@ -244,17 +244,18 @@ def extract_markdown_tables(text):
 
 
 def normalize_markdown_tables(text):
-    """Parse, validate, deduplicate, and reconstruct markdown tables.
+    """Validate and clean markdown tables from LLM responses.
     
-    Extracts tables from markdown, parses them into DataFrames, deduplicates
-    rows by Label and Categories, filters out incomplete entries, and rebuilds
-    clean markdown output. Non-table content is preserved as-is.
+    Extracts tables from markdown text, parses them into DataFrames, filters out
+    incomplete rows (rows missing cells compared to header), and reconstructs clean
+    markdown tables. This prevents export errors and ensures valid table structure
+    before displaying or exporting to Excel. Non-table content is preserved as-is.
     
     Args:
         text: String containing markdown with tables
     
     Returns:
-        String with normalized (deduplicated and validated) tables
+        String with validated tables and incomplete rows removed
     """
     blocks = _find_table_blocks(text)
     result = []
@@ -872,13 +873,11 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
                    - FORMAT STRICTLY as: "1=value1, 2=value2, 3=value3" (number=description, comma-separated, NO SEMICOLONS)
                    - If no categories exist, write "N/A"
                    - Do NOT invent category mappings not in the source
-                   - Do NOT use HTML tags like <br> or newlines within cells - keep each row as one line
 
                 4. SOURCE (Column 4):
                    - Extract from "[Source: filename]" at the start of each variable block
                    - Must be present for EVERY variable (required field)
                    - Use the exact source filename provided
-                   - If the same variable (identical Label and Categories) appears in multiple source files (e.g., different waves/follow-ups), combine them into ONE row with comma-separated sources: "Wave1_Baseline, Wave2_FollowUp"
 
                 5. DEDUPLICATION:
                    - Variables with identical Label and Categories are the same variable collected across different time points
