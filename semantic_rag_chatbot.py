@@ -62,7 +62,7 @@ GROQ_MODEL_ID = "llama-3.1-8b-instant"
 GROK_MODEL_ID = "grok-4-1-fast-reasoning"
 
 # LLM Hyperparameters
-LLM_TEMPERATURE = 0.2           # Deterministic, precise responses (0.0=deterministic, 1.0=creative)
+LLM_TEMPERATURE = 0.3           # Balanced: accurate answers with flexibility for general knowledge (0.0=deterministic, 1.0=creative)
 
 # Retrieval Parameters
 RETRIEVAL_K_BACKGROUND = 5      # Top-5 docs for cohort background context
@@ -737,7 +737,7 @@ with st.sidebar:
     st.markdown("---")
     
     # LLM Model Selection
-    st.subheader("LLM Model Selection")
+    st.subheader("Select LLM Model")
     available_models = [LLM_MODEL_GROQ, LLM_MODEL_GROK]
     selected_model = st.radio(
         "Choose LLM model:",
