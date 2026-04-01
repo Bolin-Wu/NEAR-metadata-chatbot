@@ -4,16 +4,21 @@ import glob
 
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
-from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from xml_parser import parse_xml_to_document
+from xml_parser import parse_xml_to_documents
 from json_parser import parse_json_to_document
+import time
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 CHROMA_DB = "./chroma_prod_db"          # Production database
 DATA_ROOT = "./data"
+
+# Chunk configuration
+# XML now uses one variable per document via parse_xml_to_documents()
+JSON_CHUNK_SIZE = 1200
+JSON_CHUNK_OVERLAP = 200
 
 # Functions ─────────────────────────────────────────────────────────────────
 def get_embeddings():
@@ -42,26 +47,16 @@ def process_database_to_vectorstore(data_dir: str, database_name: str = None):
     prefix = f"[{database_name}] " if database_name else ""
     print(f"\n{prefix}Processing {data_dir}...")
     
-    # Initialize text splitters for different document types
-    xml_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=800,
-        chunk_overlap=150,
-        separators=[
-            "\n\n",
-            "Variable:",
-            "\n",
-            " "
-        ]
-    )
-    
+    # Initialize text splitter for JSON documents only
     # JSON (database description) uses larger chunks and focuses on paragraph breaks
     json_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1200,  # Larger chunks for coherent descriptive text
-        chunk_overlap=200,
+        chunk_size=JSON_CHUNK_SIZE,  # Larger chunks for coherent descriptive text
+        chunk_overlap=JSON_CHUNK_OVERLAP,
         separators=[
             "\n\n",  # Paragraph breaks
-            "Data Collection",
-            "Description:",
+            "Data Collection Events:",  # Match actual output from json_parser
+            "Summary of Shared Protocols",
+            "Population:",
             "\n",
             " "
         ]
@@ -69,6 +64,10 @@ def process_database_to_vectorstore(data_dir: str, database_name: str = None):
     
     # Find and add the JSON description file
     json_files = glob.glob(os.path.join(data_dir, "*.json"))
+    
+    if not json_files:
+        print(f"  ⚠ No JSON files found in {data_dir}")
+    
     for json_file in json_files:
         try:
             doc = parse_json_to_document(json_file, database_name=database_name)
@@ -79,19 +78,20 @@ def process_database_to_vectorstore(data_dir: str, database_name: str = None):
         except Exception as e:
             print(f"  ✗ Could not read {json_file}: {e}")
     
-    if not xml_files and not documents:
+    if not xml_files and not json_files:
         raise FileNotFoundError(f"No XML or JSON files found in {data_dir}")
+    
+    if not xml_files:
+        print(f"  ⚠ No XML files found in {data_dir}")
     
     # Process XML files
     for file_path in xml_files:
         file_name = os.path.basename(file_path)
         
         try:
-            doc = parse_xml_to_document(file_path, database_name=database_name)
-            # Split XML documents with the XML-optimized splitter
-            xml_chunks = xml_splitter.split_documents([doc])
-            documents.extend(xml_chunks)
-            print(f"  ✓ Loaded {file_name} ({len(xml_chunks)} chunks)")
+            variable_docs = parse_xml_to_documents(file_path, database_name=database_name)
+            documents.extend(variable_docs)
+            print(f"  ✓ Loaded {file_name} ({len(variable_docs)} variable-docs)")
         except Exception as e:
             print(f"  ✗ Could not parse {file_name}: {e}")
     
@@ -111,7 +111,9 @@ if __name__ == "__main__":
     databases = get_available_databases()
     
     if not databases:
-        print(f"\n✗ No databases found in {DATA_ROOT}")
+        print(f"✗ No databases found in {DATA_ROOT}")
+        exit(1)
+    
     # Train all databases to production
     selected_databases = databases
     target_db = CHROMA_DB
@@ -137,6 +139,7 @@ if __name__ == "__main__":
     
     # Train vector store (separate collection for each database)
     try:
+        script_start = time.time()
         embeddings = get_embeddings()
         print(f"\nCreating embeddings and storing in production database...")
         print(f"Each database will have its own collection.\n")
@@ -144,6 +147,7 @@ if __name__ == "__main__":
         total_items = 0
         
         for db in selected_databases:
+            db_start = time.time()
             data_dir = os.path.join(DATA_ROOT, db)
             chunks = process_database_to_vectorstore(data_dir, database_name=db)
             
@@ -159,11 +163,14 @@ if __name__ == "__main__":
             )
             
             items_count = vectorstore._collection.count()
-            print(f"    ✓ Collection '{collection_name}' created with {items_count} items")
+            db_elapsed = time.time() - db_start
+            print(f"    ✓ Collection '{collection_name}' created with {items_count} items ({db_elapsed:.1f}s)")
             total_items += items_count
         
+        total_elapsed = time.time() - script_start
         print(f"\n✓ Training complete!")
         print(f"Total items across all collections: {total_items}")
+        print(f"Total time: {total_elapsed:.1f}s")
         print(f"Vector store saved to: {os.path.abspath(target_db)}")
         print(f"Collections created: {', '.join([f'{db.lower()}_metadata' for db in selected_databases])}")
         print("\n💡 Next step: Compress and upload chroma_prod_db to HuggingFace Hub")

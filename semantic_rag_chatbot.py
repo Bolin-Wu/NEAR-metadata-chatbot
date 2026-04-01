@@ -22,7 +22,7 @@ import zipfile
 load_dotenv()
 
 # Configure logging (set to WARNING for production, INFO/DEBUG for development)
-logging.basicConfig(level=logging.WARNING)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -66,8 +66,10 @@ LLM_TEMPERATURE = 0.3           # Balanced: accurate answers with flexibility fo
 
 # Retrieval Parameters
 RETRIEVAL_K_BACKGROUND = 5      # Top-5 docs for cohort background context
-RETRIEVAL_K_CONTEXT = 30        # Top-30 docs for variable definitions (increased for better category capture)
-RETRIEVAL_K_CONTEXT_GROQ = 15   # Reduced for Groq free tier to stay within 6000 TPM token limit
+RETRIEVAL_K_CONTEXT = 40        # Top-40 docs for variable definitions (increased for better category capture)
+RETRIEVAL_K_CONTEXT_GROQ = 20   # Reduced for Groq free tier to stay within 6000 TPM token limit
+RETRIEVAL_K_CONTEXT_BROAD = 60  # Higher recall for broad recommendation queries
+RETRIEVAL_K_CONTEXT_BROAD_GROQ = 30
 
 # Safe way to get API keys
 try:
@@ -545,13 +547,15 @@ def get_database_description(vectorstore):
         return ""
     
     try:
-        retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
+        retriever = vectorstore.as_retriever(
+            search_kwargs={
+                "k": 10,
+                "filter": {"type": "database_description"}
+            }
+        )
         docs = retriever.invoke("database description overview cohort study information")
         
-        descriptions = [
-            doc.page_content for doc in docs 
-            if doc.metadata.get("type") == "database_description"
-        ]
+        descriptions = [doc.page_content for doc in docs]
         
         return "\n\n".join(descriptions) if descriptions else ""
     except Exception as e:
@@ -565,13 +569,15 @@ def get_relevant_background(query, vectorstore):
     
     try:
         # Perform semantic search on the entire collection
-        retriever = vectorstore.as_retriever(search_kwargs={"k": RETRIEVAL_K_BACKGROUND})
+        retriever = vectorstore.as_retriever(
+            search_kwargs={
+                "k": RETRIEVAL_K_BACKGROUND,
+                "filter": {"type": "database_description"}
+            }
+        )
         docs = retriever.invoke(query)
         
-        background_docs = [
-            doc for doc in docs 
-            if doc.metadata.get("type") == "database_description"
-        ]
+        background_docs = docs
         
         if not background_docs:
             return get_database_description(vectorstore)
@@ -583,6 +589,28 @@ def get_relevant_background(query, vectorstore):
         logger.error(f"Error retrieving background: {e}")
         return get_database_description(vectorstore)
 
+
+def is_broad_variable_query(query: str) -> bool:
+    """Heuristic detector for broad recommendation-style variable queries."""
+    if not query:
+        return False
+
+    query_lower = query.lower()
+    broad_markers = [
+        "recommend",
+        "suggest",
+        "construct",
+        "build",
+        "scale",
+        "score",
+        "index",
+        "all variables",
+        "overview",
+        "list variables",
+    ]
+
+    return any(marker in query_lower for marker in broad_markers)
+
 def filter_and_organize_context(query, vectorstore, llm_model=None):
     """Retrieve variable definitions relevant to the query.
     
@@ -592,32 +620,43 @@ def filter_and_organize_context(query, vectorstore, llm_model=None):
         return "", []
     
     try:
-        # Adjust retrieval depth based on LLM model to stay within token limits
-        k_context = RETRIEVAL_K_CONTEXT
+        # Adjust retrieval depth based on query intent and LLM model.
+        broad_query = is_broad_variable_query(query)
         if llm_model == LLM_MODEL_GROQ:
-            k_context = RETRIEVAL_K_CONTEXT_GROQ  # Reduced for free tier
+            k_context = RETRIEVAL_K_CONTEXT_BROAD_GROQ if broad_query else RETRIEVAL_K_CONTEXT_GROQ
+        else:
+            k_context = RETRIEVAL_K_CONTEXT_BROAD if broad_query else RETRIEVAL_K_CONTEXT
         
         # Increase retrieval depth to capture more complete category information
         # especially for broader queries like "recommend variables for CIRS"
-        retriever = vectorstore.as_retriever(search_kwargs={"k": k_context})
+        retriever = vectorstore.as_retriever(
+            search_kwargs={
+                "k": k_context,
+                "filter": {"type": "variable_definitions"}
+            }
+        )
         docs = retriever.invoke(query)
-        
-        var_defs = [
-            doc for doc in docs 
-            if doc.metadata.get("type") == "variable_definitions"
-        ]
+        var_defs = docs
         
         # Debug logging: show how many documents were retrieved
-        logger.debug(f"Query: '{query}' | Retrieved {len(docs)} total docs | {len(var_defs)} are variable definitions | Model: {llm_model}")
+        logger.debug(
+            f"Query: '{query}' | BroadQuery: {broad_query} | k_context: {k_context} "
+            f"| Retrieved {len(docs)} total docs | {len(var_defs)} are variable definitions | Model: {llm_model}"
+        )
         
         # Include source information in context
         context_parts = []
         for doc in var_defs:
             source = doc.metadata.get("source", "Unknown")
+            variable_name = doc.metadata.get("variable_name")
             # Remove .xml suffix if present
             if source.endswith(".xml"):
                 source = source[:-4]
-            context_parts.append(f"[Source: {source}]\n{doc.page_content}")
+
+            if variable_name:
+                context_parts.append(f"[Source: {source} | Variable: {variable_name}]\n{doc.page_content}")
+            else:
+                context_parts.append(f"[Source: {source}]\n{doc.page_content}")
         
         context_text = "\n\n---\n\n".join(context_parts)
         logger.debug(f"Final context: {len(context_parts)} variable definitions included ({len(context_text)} chars)")
@@ -792,9 +831,9 @@ with col1:
     st.caption("- How is sleep measured?")
     st.caption("- What social engagement data do you have?")
 with col2:
-    st.caption("- Tell me about this cohort")
-    st.caption("- What physical activity data is there?")
-    st.caption("- Are there medication records?")
+    st.caption("- Recommend variables for ADL score.")
+    st.caption("- Recommend variables for constructing CIRS.")
+    st.caption("- Suggest variables for frailty index.")
 with col3:
     st.caption("- How do you assess mental health?")
     st.caption("- What nutrition data is available?")
@@ -831,8 +870,22 @@ if prompt := st.chat_input(placeholder_text):
                 # Returns both context text and document list
                 context, context_docs = filter_and_organize_context(prompt, vectorstore, st.session_state.selected_llm_model)
 
-                # Use unified prompt template for metadata queries with table format
-                prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata.
+                # Avoid blank assistant output when retrieval returns no variable chunks.
+                if not context.strip():
+                    response = (
+                        "I could not find matching variable definitions for that query in the selected database. "
+                        "Try a more specific term (for example: systolic, diastolic, hypertension, blood pressure)."
+                    )
+                    logger.warning(
+                        "Empty retrieval context for query '%s' in database '%s' using model '%s'",
+                        prompt,
+                        st.session_state.get("selected_database"),
+                        st.session_state.selected_llm_model,
+                    )
+                else:
+
+                    # Use unified prompt template for metadata queries with table format
+                    prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata.
 CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly provided in VARIABLE DATA below.
 
                 COHORT BACKGROUND:
@@ -843,6 +896,9 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
                 Your task is to answer questions about variables and metadata from this cohort.
 
                 ### VARIABLE DATA (ONLY SOURCE OF TRUTH):
+                Each block below represents one retrieved variable definition.
+                Each block begins with a header in this format:
+                [Source: source_file_name | Variable: variable_name]
                 {context}
 
                 ### Question from user:
@@ -881,7 +937,7 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
                    - Do NOT invent category mappings not in the source
 
                 4. SOURCE (Column 4):
-                   - Extract from "[Source: filename]" at the start of each variable block
+                         - Extract from the header "[Source: filename | Variable: variable_name]" at the start of each block
                    - Must be present for EVERY variable (required field)
                    - Use the exact source filename provided
 
@@ -889,6 +945,7 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
                    - Variables with identical Label and Categories are the same variable collected across different time points
                    - COMBINES these into a single row with all variable names and sources listed
                    - This provides visibility into data collection across waves while avoiding redundancy
+                         - Only combine rows when the source text supports that they are the same concept across waves
 
                 6. VALIDATION (CRITICAL - MUST FOLLOW):
                    - EVERY row must have ALL 4 columns completely filled (NO EMPTY CELLS)
@@ -918,43 +975,46 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
 
                 Answer:"""
 
-                PROMPT = PromptTemplate(
-                    template=prompt_template, 
-                    input_variables=["cohort_background", "context", "question"]
-                )
+                    PROMPT = PromptTemplate(
+                        template=prompt_template, 
+                        input_variables=["cohort_background", "context", "question"]
+                    )
 
-                rag_chain = (
-                    {
-                        "cohort_background": lambda user_query: get_relevant_background(user_query, vectorstore),
-                        "context": lambda _: context,
-                        "question": RunnablePassthrough()
-                    }
-                    | PROMPT
-                    | llm
-                    | StrOutputParser()
-                )
+                    rag_chain = (
+                        {
+                            "cohort_background": lambda user_query: get_relevant_background(user_query, vectorstore),
+                            "context": lambda _: context,
+                            "question": RunnablePassthrough()
+                        }
+                        | PROMPT
+                        | llm
+                        | StrOutputParser()
+                    )
 
-                try:
-                    logger.debug(f"Starting LLM invocation with query: {prompt[:100]}...")
-                    logger.debug(f"Context length: {len(context)} chars, {len(context_docs)} docs")
-                    logger.debug(f"Using model: {st.session_state.selected_llm_model}")
-                    response = rag_chain.invoke(prompt)
-                    logger.debug(f"LLM Response received (first 500 chars): {response[:500]}")
-                except Exception as e:
-                    error_str = str(e)
-                    logger.error(f"LLM Error: {error_str}")
-                    logger.exception("Full exception traceback:")
-                    
-                    # Check for token limit exceeded error
-                    if "rate_limit_exceeded" in error_str and "tokens" in error_str.lower():
-                        st.error("⚠️ Request too large for Groq free tier. Try asking about a smaller subset of variables or use the Grok model instead.")
-                        response = "Your query resulted in too much context data for the Groq free tier. Please try asking about a subset of variables, or switch to the Grok model which has higher token limits."
-                    elif "rate_limit" in str(e).lower() or "429" in str(e):
-                        st.error("⚠️ Rate limit reached. Please try again in a few moments.")
-                        response = "I'm temporarily unavailable due to high usage. Please try again shortly."
-                    else:
-                        st.error(f"Error: {str(e)}")
-                        response = ""
+                    try:
+                        logger.debug(f"Starting LLM invocation with query: {prompt[:100]}...")
+                        logger.debug(f"Context length: {len(context)} chars, {len(context_docs)} docs")
+                        logger.debug(f"Using model: {st.session_state.selected_llm_model}")
+                        response = rag_chain.invoke(prompt)
+                        logger.debug(f"LLM Response received (first 500 chars): {response[:500]}")
+                    except Exception as e:
+                        error_str = str(e)
+                        logger.error(f"LLM Error: {error_str}")
+                        logger.exception("Full exception traceback:")
+                        
+                        # Check for token limit exceeded error
+                        if "rate_limit_exceeded" in error_str and "tokens" in error_str.lower():
+                            st.error("⚠️ Request too large for Groq free tier. Try asking about a smaller subset of variables or use the Grok model instead.")
+                            response = "Your query resulted in too much context data for the Groq free tier. Please try asking about a subset of variables, or switch to the Grok model which has higher token limits."
+                        elif "rate_limit" in str(e).lower() or "429" in str(e):
+                            st.error("⚠️ Rate limit reached. Please try again in a few moments.")
+                            response = "I'm temporarily unavailable due to high usage. Please try again shortly."
+                        else:
+                            st.error(f"Error: {str(e)}")
+                            response = (
+                                "I ran into an issue while generating the answer. "
+                                "Please try again, switch model, or narrow the query."
+                            )
 
         # Prepend database hint to response
         selected_db = st.session_state.get("selected_database")

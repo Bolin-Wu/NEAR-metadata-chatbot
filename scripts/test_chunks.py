@@ -21,13 +21,14 @@ xml_splitter = RecursiveCharacterTextSplitter(
 json_splitter = RecursiveCharacterTextSplitter(
     chunk_size=1200,  # Larger chunks for coherent descriptive text
     chunk_overlap=200,
-    separators=[
-        "\n\n",  # Paragraph breaks
-        "Data Collection",
-        "Description:",
-        "\n",
-        " "
-    ]
+        separators=[
+            "\n\n",  # Paragraph breaks
+            "Data Collection Events:",  # Match actual output from json_parser
+            "Summary of Shared Protocols",
+            "Population:",
+            "\n",
+            " "
+        ]
 )
 
 print("=" * 70)

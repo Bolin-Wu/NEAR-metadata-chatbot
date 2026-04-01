@@ -71,6 +71,72 @@ def parse_xml_to_text(file_path: str) -> str:
     return cleaned_text
 
 
+def _extract_variable_document(variable, file_path: str, database_name: str = None) -> Document:
+    """Convert one <variable> XML element into one LangChain Document."""
+    skip_attrs = {'Administrative_information', 'Source', 'Target'}
+
+    variable_name = variable.get('name', 'unknown')
+    lines = [f"Variable: {variable_name}"]
+
+    table_name = "unknown"
+
+    attributes_elem = variable.find('attributes')
+    if attributes_elem is not None:
+        for attr in attributes_elem.findall('attribute'):
+            attr_name = attr.get('name', 'unknown')
+            if attr_name in skip_attrs:
+                continue
+
+            attr_value = attr.text or 'N/A'
+            display_name = attr_name.replace('_', ' ').title()
+            lines.append(f"  {display_name}: {attr_value}")
+
+            if attr_name == 'original_table':
+                table_name = attr_value.strip() if attr_value else "unknown"
+
+    categories_elem = variable.find('categories')
+    if categories_elem is not None:
+        lines.append("  Categories:")
+        for cat in categories_elem.findall('category'):
+            cat_name = cat.get('name', 'unknown')
+            cat_attrs = cat.find('attributes')
+            cat_label = 'N/A'
+            if cat_attrs is not None:
+                label_attr = cat_attrs.find("attribute[@name='label']")
+                if label_attr is not None:
+                    cat_label = label_attr.text or 'N/A'
+            lines.append(f"    - Value {cat_name}: {cat_label}")
+
+    page_content = "\n".join(lines)
+    return Document(
+        page_content=page_content,
+        metadata={
+            "source": os.path.basename(file_path),
+            "database": database_name or "unknown",
+            "table": table_name,
+            "type": "variable_definitions",
+            "variable_name": variable_name,
+        }
+    )
+
+
+def parse_xml_to_documents(file_path: str, database_name: str = None):
+    """Parse XML file and return one Document per variable.
+
+    This is the preferred parser for vector indexing because it guarantees
+    variable-level chunk boundaries.
+    """
+    with open(file_path, 'r', encoding='utf-8') as f:
+        tree = ET.parse(f)
+
+    root = tree.getroot()
+    docs = []
+    for variable in root.findall('variable'):
+        docs.append(_extract_variable_document(variable, file_path, database_name))
+
+    return docs
+
+
 def extract_table_name(text: str) -> str:
     """Extract table name from parsed XML text."""
     table_name = "unknown"
@@ -82,7 +148,11 @@ def extract_table_name(text: str) -> str:
 
 
 def parse_xml_to_document(file_path: str, database_name: str = None) -> Document:
-    """Parse XML file and create a LangChain Document with metadata."""
+    """Parse XML file and create a single combined LangChain Document.
+
+    Kept for backward compatibility in utility scripts. Training should use
+    parse_xml_to_documents() for one-variable-per-document indexing.
+    """
     text = parse_xml_to_text(file_path)
     table_name = extract_table_name(text)
     
