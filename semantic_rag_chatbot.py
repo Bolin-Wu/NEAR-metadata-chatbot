@@ -931,7 +931,7 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
                    - Do NOT shorten, paraphrase, or interpret the label
 
                 3. CATEGORIES (Column 3):
-                   - Extract category values EXACTLY as written in source
+                   - Extract category values EXACTLY as they appear in the source data, typically in a "Categories:" field
                    - FORMAT STRICTLY as: "1=value1, 2=value2, 3=value3" (number=description, comma-separated, NO SEMICOLONS)
                    - If no categories exist, write "N/A"
                    - Do NOT invent category mappings not in the source

@@ -174,8 +174,8 @@ if __name__ == "__main__":
         print(f"Vector store saved to: {os.path.abspath(target_db)}")
         print(f"Collections created: {', '.join([f'{db.lower()}_metadata' for db in selected_databases])}")
         print("\n💡 Next step: Compress and upload chroma_prod_db to HuggingFace Hub")
-        print("   python -c 'import shutil; shutil.make_archive(\"chroma_prod_db\", \"zip\", \".\", \"chroma_prod_db\")'")
-        print("   huggingface-cli upload bobo200612/near-chroma-prod-db ./chroma_prod_db.zip chroma_prod_db.zip --repo-type=dataset --commit-message 'xxxxx'")
+        print("   python -c \"import shutil; shutil.make_archive('chroma_prod_db', 'zip', '.', 'chroma_prod_db')\"")
+        print("   hf upload bobo200612/near-chroma-prod-db ./chroma_prod_db.zip chroma_prod_db.zip --repo-type=dataset --commit-message 'xxxxx'")
             
     except Exception as e:
         print(f"\n✗ Error during training: {e}")
