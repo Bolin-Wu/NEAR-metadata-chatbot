@@ -66,9 +66,9 @@ LLM_TEMPERATURE = 0.3           # Balanced: accurate answers with flexibility fo
 
 # Retrieval Parameters
 RETRIEVAL_K_BACKGROUND = 5      # Top-5 docs for cohort background context
-RETRIEVAL_K_CONTEXT = 40        # Top-40 docs for variable definitions (increased for better category capture)
+RETRIEVAL_K_CONTEXT = 60        # Top-60 docs for variable definitions (increased for better category capture)
 RETRIEVAL_K_CONTEXT_GROQ = 20   # Reduced for Groq free tier to stay within 6000 TPM token limit
-RETRIEVAL_K_CONTEXT_BROAD = 60  # Higher recall for broad recommendation queries
+RETRIEVAL_K_CONTEXT_BROAD = 80  # Higher recall for broad recommendation queries
 RETRIEVAL_K_CONTEXT_BROAD_GROQ = 30
 
 # Safe way to get API keys
