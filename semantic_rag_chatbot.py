@@ -22,7 +22,7 @@ import zipfile
 load_dotenv()
 
 # Configure logging (set to WARNING for production, INFO/DEBUG for development)
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
