@@ -535,19 +535,25 @@ if "selected_llm_model" not in st.session_state:
     st.session_state.selected_llm_model = LLM_MODEL_GROQ
 
 def get_database_description(vectorstore):
-    """Retrieve database description from the vector store."""
+    """Retrieve all database description chunks via semantic search.
+    
+    Uses semantic search to find and return all chunks tagged as database descriptions,
+    providing comprehensive cohort background information as a fallback when query-specific
+    background retrieval yields no results.
+    """
     if vectorstore is None:
         return ""
     
     try:
-        all_docs = vectorstore._collection.get()
+        retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
+        docs = retriever.invoke("database description overview cohort study information")
         
-        if all_docs and all_docs.get('metadatas'):
-            for i, metadata in enumerate(all_docs['metadatas']):
-                if metadata.get("type") == "database_description":
-                    if all_docs.get('documents') and i < len(all_docs['documents']):
-                        return all_docs['documents'][i]
-        return ""
+        descriptions = [
+            doc.page_content for doc in docs 
+            if doc.metadata.get("type") == "database_description"
+        ]
+        
+        return "\n\n".join(descriptions) if descriptions else ""
     except Exception as e:
         logger.error(f"Could not retrieve database description: {e}")
         return ""
