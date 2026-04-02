@@ -260,6 +260,11 @@ def normalize_markdown_tables(text):
         String with validated tables and incomplete rows removed
     """
     blocks = _find_table_blocks(text)
+
+    # Preserve plain-text responses (no markdown table detected).
+    if not blocks:
+        return text
+
     result = []
     
     for block in blocks:
@@ -277,7 +282,10 @@ def normalize_markdown_tables(text):
         if block['after_line'] is not None:
             result.append(block['after_line'])
     
-    return "\n".join(result)
+    normalized = "\n".join(result)
+
+    # Never return an empty string when the original response had content.
+    return normalized if normalized.strip() else text
 
 
 
@@ -1021,7 +1029,15 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
         
         # Normalize response tables (parse, deduplicate, validate)
         if response:
-            response = normalize_markdown_tables(response)
+            response = normalize_markdown_tables(response).strip()
+
+        # Some models may return empty/whitespace output for no-hit queries.
+        # Ensure users always receive an explicit fallback message.
+        if not response:
+            response = (
+                "I could not find directly related variable definitions for that query in the selected database. "
+                "Try a different keyword or a broader phrasing."
+            )
         
         if selected_db and response:
             response_with_hint = f"📍 **{selected_db}**\n\n{response}"
