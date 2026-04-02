@@ -1011,12 +1011,13 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
                         logger.exception("Full exception traceback:")
                         
                         # Check for token limit exceeded error
+                        current_model = st.session_state.selected_llm_model
                         if "rate_limit_exceeded" in error_str and "tokens" in error_str.lower():
-                            st.error("⚠️ Request too large for Groq free tier. Try asking about a smaller subset of variables or use the Grok model instead.")
-                            response = "Your query resulted in too much context data for the Groq free tier. Please try asking about a subset of variables, or switch to the Grok model which has higher token limits."
+                            st.error(f"⚠️ Request too large for {current_model}. Try asking about a smaller subset of variables.")
+                            response = ""
                         elif "rate_limit" in str(e).lower() or "429" in str(e):
-                            st.error("⚠️ Rate limit reached. Please try again in a few moments.")
-                            response = "I'm temporarily unavailable due to high usage. Please try again shortly."
+                            st.error(f"⚠️ Rate limit reached for {current_model}. Please try again in a few moments.")
+                            response = ""
                         else:
                             st.error(f"Error: {str(e)}")
                             response = (
