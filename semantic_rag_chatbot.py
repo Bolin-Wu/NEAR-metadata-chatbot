@@ -793,9 +793,9 @@ with st.sidebar:
     st.session_state.selected_llm_model = selected_model
     
     if selected_model == LLM_MODEL_GROK:
-        st.caption(f"💪 Supports larger context, may take slightly longer")
+        st.caption(f"💪 Supports larger context and takes longer time to respond")
     else:
-        st.caption("⚡ Faster responses, optimized for common queries")
+        st.caption("⚡ Faster responses with slightly smaller context window (may miss some category info)")
     
     st.markdown("---")
     
