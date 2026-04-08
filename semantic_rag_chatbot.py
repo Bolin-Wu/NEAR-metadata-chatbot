@@ -977,11 +977,14 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Coming Soon / Roadmap
-    with st.expander("🚀 Feature Coming Soon"):
+    # Changelog
+    with st.expander("📋 What's New"):
         st.markdown("""
-        - **Multi-Database Search**: Query across multiple databases
-        - **Search History**: Track previous searches
+        **v1.3.1** – Exact Variable Lookup
+        - Queries like "what is BAS1_H4?" now find variables via direct metadata match
+        - Background retrieval enriched with matched variable's source & label
+        
+        [View all previous releases →](https://github.com/Bolin-Wu/NEAR-metadata-chatbot/releases)
         """)
 
 # Add disclaimer and tip about reference information
@@ -1113,7 +1116,6 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
                    - Variables with identical Label and Categories are the same variable collected across different time points
                    - COMBINES these into a single row with all variable names and sources listed
                    - This provides visibility into data collection across waves while avoiding redundancy
-                         - Only combine rows when the source text supports that they are the same concept across waves
 
                 6. VALIDATION (CRITICAL - MUST FOLLOW):
                    - EVERY row must have ALL 4 columns completely filled (NO EMPTY CELLS)
