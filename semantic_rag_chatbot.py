@@ -11,6 +11,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.documents import Document
 from langchain_core.runnables import RunnablePassthrough
 from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI  # For xAI Grok
@@ -70,6 +71,9 @@ RETRIEVAL_K_CONTEXT = 60        # Top-60 docs for variable definitions (increase
 RETRIEVAL_K_CONTEXT_GROQ = 30   # Reduced for Groq free tier to stay within 6000 TPM token limit
 RETRIEVAL_K_CONTEXT_BROAD = 80  # Higher recall for broad recommendation queries
 RETRIEVAL_K_CONTEXT_BROAD_GROQ = 40
+EXACT_MATCH_LIMIT = 3          # Exact variable-name hits to merge ahead of semantic results
+BACKGROUND_ENRICH_FALLBACK_DOCS = 3  # Fallback docs used when no exact variable match is found
+BACKGROUND_ENRICH_MAX_DOCS = 3       # Max docs used to extract enrichment terms
 
 # Safe way to get API keys
 try:
@@ -557,7 +561,7 @@ def get_database_description(vectorstore):
     try:
         retriever = vectorstore.as_retriever(
             search_kwargs={
-                "k": 10,
+                "k": 2,
                 "filter": {"type": "database_description"}
             }
         )
@@ -570,7 +574,7 @@ def get_database_description(vectorstore):
         logger.error(f"Could not retrieve database description: {e}")
         return ""
 
-def get_relevant_background(query, vectorstore):
+def get_relevant_background(query, vectorstore, context_docs=None):
     """Retrieve cohort background information relevant to the user's query."""
     if vectorstore is None:
         return ""
@@ -583,7 +587,44 @@ def get_relevant_background(query, vectorstore):
                 "filter": {"type": "database_description"}
             }
         )
-        docs = retriever.invoke(query)
+        background_query = query
+
+        # If the user query looks like an exact variable code, enrich background
+        # retrieval with matched variable labels/sources to improve relevance.
+        candidates = extract_variable_name_candidates(query)
+        if candidates and context_docs:
+            candidate_set = {c.lower() for c in candidates}
+            matched_docs = []
+
+            for doc in context_docs:
+                variable_name = (doc.metadata or {}).get("variable_name")
+                if variable_name and variable_name.lower() in candidate_set:
+                    matched_docs.append(doc)
+
+            if not matched_docs:
+                matched_docs = context_docs[:BACKGROUND_ENRICH_FALLBACK_DOCS]
+
+            enrichment_terms = []
+            seen_terms = set()
+            for doc in matched_docs[:BACKGROUND_ENRICH_MAX_DOCS]:
+                source = (doc.metadata or {}).get("source")
+                if source:
+                    clean_source = source.replace(".xml", "")
+                    if clean_source.lower() not in seen_terms:
+                        seen_terms.add(clean_source.lower())
+                        enrichment_terms.append(clean_source)
+
+                label_match = re.search(r"(?im)^Label:\s*(.+)$", doc.page_content or "")
+                if label_match:
+                    label = label_match.group(1).strip()
+                    if label.lower() not in seen_terms:
+                        seen_terms.add(label.lower())
+                        enrichment_terms.append(label)
+
+            if enrichment_terms:
+                background_query = f"{query} {' '.join(enrichment_terms)} background"
+
+        docs = retriever.invoke(background_query)
         
         background_docs = docs
         
@@ -591,7 +632,7 @@ def get_relevant_background(query, vectorstore):
             return get_database_description(vectorstore)
         
         return "\n\n---\n\n".join(
-            [doc.page_content for doc in background_docs[:2]]
+            [doc.page_content for doc in background_docs]
         )
     except Exception as e:
         logger.error(f"Error retrieving background: {e}")
@@ -619,6 +660,123 @@ def is_broad_variable_query(query: str) -> bool:
 
     return any(marker in query_lower for marker in broad_markers)
 
+
+def extract_variable_name_candidates(query: str) -> list[str]:
+    """Extract likely variable identifiers from a user query.
+
+    Targets code-like identifiers such as BAS1_H4, v518, or quoted variable names.
+    """
+    if not query:
+        return []
+
+    candidates = []
+    seen = set()
+
+    def add_candidate(value: str) -> None:
+        cleaned = value.strip().strip("`'\"")
+        if not cleaned:
+            return
+        if cleaned.lower() in seen:
+            return
+        seen.add(cleaned.lower())
+        candidates.append(cleaned)
+
+    for match in re.findall(r"[`\"']([A-Za-z][A-Za-z0-9_:-]*)[`\"']", query):
+        add_candidate(match)
+
+    for token in re.findall(r"\b[A-Za-z][A-Za-z0-9_:-]*\b", query):
+        if any(char.isdigit() for char in token) or "_" in token or "-" in token or token.isupper():
+            add_candidate(token)
+
+    return candidates
+
+
+def _collection_payload_to_documents(payload: dict | None) -> list[Document]:
+    """Convert a Chroma collection.get payload into LangChain Documents."""
+    if not payload:
+        return []
+
+    documents = payload.get("documents") or []
+    metadatas = payload.get("metadatas") or []
+    results = []
+
+    for index, page_content in enumerate(documents):
+        metadata = metadatas[index] if index < len(metadatas) else {}
+        results.append(Document(page_content=page_content, metadata=metadata or {}))
+
+    return results
+
+
+def deduplicate_documents(documents: list[Document]) -> list[Document]:
+    """Deduplicate retrieval results while preserving order."""
+    unique_docs = []
+    seen = set()
+
+    for doc in documents:
+        metadata = doc.metadata or {}
+        key = (
+            metadata.get("source"),
+            metadata.get("variable_name"),
+            doc.page_content,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_docs.append(doc)
+
+    return unique_docs
+
+
+def exact_variable_name_lookup(query: str, vectorstore) -> list[Document]:
+    """Look up variable documents by exact metadata match before semantic search."""
+    if vectorstore is None:
+        return []
+
+    collection = getattr(vectorstore, "_collection", None)
+    if collection is None:
+        return []
+
+    candidates = extract_variable_name_candidates(query)
+    if not candidates:
+        return []
+
+    exact_docs = []
+
+    for candidate in candidates:
+        candidate_variants = [candidate]
+        for variant in (candidate.upper(), candidate.lower()):
+            if variant not in candidate_variants:
+                candidate_variants.append(variant)
+
+        for variant in candidate_variants:
+            payload = collection.get(
+                where={"variable_name": variant},
+                include=["documents", "metadatas"],
+                limit=EXACT_MATCH_LIMIT,
+            )
+            exact_docs.extend(_collection_payload_to_documents(payload))
+
+        if exact_docs:
+            continue
+
+        payload = collection.get(
+            where={"type": "variable_definitions"},
+            where_document={"$contains": f"Variable: {candidate}"},
+            include=["documents", "metadatas"],
+            limit=EXACT_MATCH_LIMIT,
+        )
+        exact_docs.extend(_collection_payload_to_documents(payload))
+
+    exact_docs = deduplicate_documents(exact_docs)
+    if exact_docs:
+        logger.debug(
+            "Exact variable lookup matched %s docs for candidates %s",
+            len(exact_docs),
+            candidates,
+        )
+
+    return exact_docs
+
 def filter_and_organize_context(query, vectorstore, llm_model=None):
     """Retrieve variable definitions relevant to the query.
     
@@ -644,12 +802,14 @@ def filter_and_organize_context(query, vectorstore, llm_model=None):
             }
         )
         docs = retriever.invoke(query)
-        var_defs = docs
+        exact_docs = exact_variable_name_lookup(query, vectorstore)
+        var_defs = deduplicate_documents(exact_docs + docs)
         
         # Debug logging: show how many documents were retrieved
         logger.debug(
             f"Query: '{query}' | BroadQuery: {broad_query} | k_context: {k_context} "
-            f"| Retrieved {len(docs)} total docs | {len(var_defs)} are variable definitions | Model: {llm_model}"
+            f"| Semantic docs: {len(docs)} | Exact docs: {len(exact_docs)} "
+            f"| Final docs: {len(var_defs)} | Model: {llm_model}"
         )
         
         # Include source information in context
@@ -990,7 +1150,7 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
 
                     rag_chain = (
                         {
-                            "cohort_background": lambda user_query: get_relevant_background(user_query, vectorstore),
+                            "cohort_background": lambda user_query: get_relevant_background(user_query, vectorstore, context_docs),
                             "context": lambda _: context,
                             "question": RunnablePassthrough()
                         }
