@@ -505,7 +505,7 @@ if "latest_tables_with_headers" not in st.session_state:
 if "selected_llm_model" not in st.session_state:
     st.session_state.selected_llm_model = LLM_MODEL_GROQ
 
-def get_database_description(vectorstore):
+def get_complete_background(vectorstore):
     """Retrieve all database description chunks via semantic search.
     
     Uses semantic search to find and return all chunks tagged as database descriptions,
@@ -579,21 +579,21 @@ def get_relevant_background(query, vectorstore, context_docs=None):
                         enrichment_terms.append(label)
 
             if enrichment_terms:
-                background_query = f"{query} {' '.join(enrichment_terms)} background"
+                background_query = f"{query} {' '.join(enrichment_terms)}"
 
         docs = retriever.invoke(background_query)
         
         background_docs = docs
         
         if not background_docs:
-            return get_database_description(vectorstore)
+            return get_complete_background(vectorstore)
         
         return "\n\n---\n\n".join(
             [doc.page_content for doc in background_docs]
         )
     except Exception as e:
         logger.error(f"Error retrieving background: {e}")
-        return get_database_description(vectorstore)
+        return get_complete_background(vectorstore)
 
 
 def is_broad_variable_query(query: str) -> bool:
@@ -1014,7 +1014,7 @@ if prompt := st.chat_input(placeholder_text):
 
                     # Use unified prompt template for metadata queries with table format
                     prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata.
-CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly provided in VARIABLE DATA below.
+CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly provided in NEAR metadata below.
 
                 COHORT BACKGROUND:
                 {cohort_background}
@@ -1023,7 +1023,7 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
 
                 Your task is to answer questions about variables and metadata from this cohort.
 
-                ### VARIABLE DATA (ONLY SOURCE OF TRUTH):
+                ### NEAR metadata (ONLY SOURCE OF TRUTH):
                 Each block below represents one retrieved variable definition.
                 Each block begins with a header in this format:
                 [Source: source_file_name | Variable: variable_name]
@@ -1065,7 +1065,7 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
                    - Do NOT invent category mappings not in the source
 
                 4. SOURCE (Column 4):
-                         - Extract from the header "[Source: filename | Variable: variable_name]" at the start of each block
+                   - Extract from the header "[Source: filename | Variable: variable_name]" at the start of each block
                    - Must be present for EVERY variable (required field)
                    - Use the exact source filename provided
 
