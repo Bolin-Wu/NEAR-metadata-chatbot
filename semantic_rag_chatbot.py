@@ -249,54 +249,11 @@ def extract_markdown_tables(text):
     return tables_with_headers
 
 
-def normalize_markdown_tables(text):
-    """Validate and clean markdown tables from LLM responses.
-    
-    Extracts tables from markdown text, parses them into DataFrames, filters out
-    incomplete rows (rows missing cells compared to header), and reconstructs clean
-    markdown tables. This prevents export errors and ensures valid table structure
-    before displaying or exporting to Excel. Non-table content is preserved as-is.
-    
-    Args:
-        text: String containing markdown with tables
-    
-    Returns:
-        String with validated tables and incomplete rows removed
-    """
-    blocks = _find_table_blocks(text)
-
-    # Preserve plain-text responses (no markdown table detected).
-    if not blocks:
-        return text
-
-    result = []
-    
-    for block in blocks:
-        # Add lines before this table
-        result.extend(block['before_lines'])
-        
-        # Parse and deduplicate the table
-        df = _parse_markdown_table(block['table_lines'])
-        if df is not None and not df.empty:
-            # Convert back to markdown
-            md_lines = _dataframe_to_markdown(df, block['header'])
-            result.extend(md_lines)
-        
-        # Add line after table (if not end of text)
-        if block['after_line'] is not None:
-            result.append(block['after_line'])
-    
-    normalized = "\n".join(result)
-
-    # Never return an empty string when the original response had content.
-    return normalized if normalized.strip() else text
-
-
 
 def export_tables_to_excel(tables_with_headers):
     """Export multiple DataFrames to Excel file with formatted sheets.
     
-    Args:
+    Args: 
         tables_with_headers: List of (header_text, DataFrame) tuples
     
     Returns:
@@ -1190,9 +1147,9 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
         # Prepend database hint to response
         selected_db = st.session_state.get("selected_database")
         
-        # Normalize response tables (parse, deduplicate, validate)
+        # Trim whitespace while preserving the original LLM response text.
         if response:
-            response = normalize_markdown_tables(response).strip()
+            response = response.strip()
 
         # Some models may return empty/whitespace output for no-hit queries.
         # Ensure users always receive an explicit fallback message.
