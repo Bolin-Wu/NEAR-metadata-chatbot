@@ -1,0 +1,20 @@
+.git/
+.gitignore
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# Never bake secrets into image
+.env
+.env.*
+
+# Large local data not needed in container image
+chroma_prod_db/
+chroma_prod_db_backup*/
+data/
+
+# Build/artifact folders
+near_metadata_chatbot.egg-info/
