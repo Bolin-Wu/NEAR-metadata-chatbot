@@ -157,33 +157,6 @@ def _find_table_blocks(text):
     return blocks
 
 
-def _dataframe_to_markdown(df, header=None):
-    """Convert a DataFrame to markdown table lines.
-    
-    Args:
-        df: pandas DataFrame
-        header: Optional header text to prepend
-    
-    Returns:
-        List of markdown table lines
-    """
-    if df is None or df.empty:
-        return []
-    
-    lines = []
-    if header:
-        lines.append(header)
-    
-    # Header row
-    lines.append("|" + "|".join(f" {col} " for col in df.columns) + "|")
-    # Separator
-    lines.append("|" + "|".join("---" for _ in df.columns) + "|")
-    # Data rows
-    for _, row in df.iterrows():
-        lines.append("|" + "|".join(f" {str(val)} " for val in row) + "|")
-    
-    return lines
-
 
 def _parse_markdown_table(table_lines):
     """Parse a list of markdown table lines into a DataFrame.
