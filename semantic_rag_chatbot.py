@@ -946,7 +946,7 @@ with st.sidebar:
 
 # Add disclaimer and tip about reference information
 st.info("""
-**ℹ️ Disclaimer:** The information provided here is for a quick overview only. For more accurate and comprehensive metadata, please check with [Maelstrom catalogue](https://www.maelstrom-research.org/search#lists?type=studies&query=network(in(Mica_network.id,near)),variable(limit(0,20)),study(in(Mica_study.className,Study),limit(0,20))) or the NEAR team.
+**ℹ️ Disclaimer:** This chatbot is intended for quick overview only and uses NEAR metadata submitted to Maelstrom. Some variables may not be included (for example, derived variables and certain registry data). For complete and validated metadata, please refer to the [Maelstrom catalogue](https://www.maelstrom-research.org/search#lists?type=studies&query=network(in(Mica_network.id,near)),variable(limit(0,20)),study(in(Mica_study.className,Study),limit(0,20))) or contact the NEAR team.
 
 **💡 Tip:** If you're not satisfied with the results, try searching again with different wording or switch AI models. The same question may yield different results due to the nature of AI-powered responses.
 """)
