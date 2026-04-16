@@ -934,13 +934,14 @@ with col1:
     st.caption("- How is sleep measured?")
     st.caption("- What social engagement data do you have?")
 with col2:
-    st.caption("- Recommend variables for ADL score.")
+    st.caption("- What nutrition data is available?")
     st.caption("- Recommend variables for constructing CIRS.")
     st.caption("- Suggest variables for frailty index.")
 with col3:
     st.caption("- How do you assess mental health?")
-    st.caption("- What nutrition data is available?")
-    st.caption("- What biomarkers were measured?")
+    st.caption("- List ADL variables and map each to core ADL, ADL+IADL, and wave-specific sets.")
+    st.caption("- Give all bathing, dressing, toileting, transferring variables with source and categories.")
+
 
 # ── Chat ──────────────────────────────────────────────────────────────────────
 if "messages" not in st.session_state:
@@ -988,8 +989,7 @@ if prompt := st.chat_input(placeholder_text):
                 else:
 
                     # Use unified prompt template for metadata queries with table format
-                    prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata.
-CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly provided in NEAR metadata below.
+                    prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata. CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly provided in NEAR metadata below.
 
                 COHORT BACKGROUND:
                 {cohort_background}
@@ -1008,6 +1008,8 @@ CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly pro
                 {question}
 
                 ### Your Response Instructions:
+                - Treat every question as a single-turn request based only on the current question and provided metadata context
+                - DO NOT include follow-up offers such as "If you want, I can...", "Would you like me to...", or "I can also..."
                 - Group related variables by theme
                 - Start with a clear, natural explanation of the topic based on the related cohort background
                 - Use your own words to describe what the variables measure
