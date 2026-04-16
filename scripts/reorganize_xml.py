@@ -15,7 +15,7 @@ proceeding with vectorstore training.
 import os
 import shutil
 
-DATA_ROOT = "./data"
+DATA_ROOT = "./data_2026April"  # Update this to your actual data root directory
 
 # Iterate through all subdirectories in DATA_ROOT
 for database in os.listdir(DATA_ROOT):

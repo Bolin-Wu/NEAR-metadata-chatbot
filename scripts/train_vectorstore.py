@@ -1,6 +1,8 @@
 import os
 import shutil
 import glob
+import argparse
+from datetime import datetime
 
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
@@ -25,19 +27,58 @@ def get_embeddings():
     """Initialize embeddings model."""
     return HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
 
-def get_available_databases():
+def parse_args():
+    """Parse command line arguments for retraining."""
+    parser = argparse.ArgumentParser(
+        description="Train Chroma vector store from NEAR metadata folders."
+    )
+    parser.add_argument(
+        "--data-root",
+        default=DATA_ROOT,
+        help="Root folder containing one subfolder per database (default: ./data)",
+    )
+    parser.add_argument(
+        "--target-db",
+        default=CHROMA_DB,
+        help="Chroma persist directory (default: ./chroma_prod_db)",
+    )
+    parser.add_argument(
+        "--embedding-model",
+        default=EMBEDDING_MODEL,
+        help="Sentence-transformers embedding model name",
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip interactive confirmations",
+    )
+    parser.add_argument(
+        "--backup-existing",
+        action="store_true",
+        help="Backup target DB before deleting when retraining",
+    )
+    return parser.parse_args()
+
+def get_available_databases(data_root: str):
     """Get list of available databases by scanning the data directory."""
-    if not os.path.exists(DATA_ROOT):
+    if not os.path.exists(data_root):
         return []
     
-    # Get subdirectories in DATA_ROOT (each subdirectory is a database)
+    # Get subdirectories in data_root (each subdirectory is a database)
     databases = []
-    for item in os.listdir(DATA_ROOT):
-        item_path = os.path.join(DATA_ROOT, item)
+    for item in os.listdir(data_root):
+        item_path = os.path.join(data_root, item)
         if os.path.isdir(item_path):
             databases.append(item)
     
     return sorted(databases)
+
+def maybe_backup_directory(path: str):
+    """Create a timestamped backup of an existing directory."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = f"{path}_backup_{timestamp}"
+    shutil.copytree(path, backup_path)
+    print(f"Backed up existing DB to {backup_path}")
 
 def process_database_to_vectorstore(data_dir: str, database_name: str = None):
     """Process XML and JSON files from the specified database directory and create vector store."""
@@ -104,43 +145,60 @@ def process_database_to_vectorstore(data_dir: str, database_name: str = None):
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    args = parse_args()
+
+    data_root = args.data_root
+    target_db = args.target_db
+
     print("=" * 60)
     print("NEAR Metadata Vector Store Training Script")
     print("=" * 60)
+    print(f"Data root: {os.path.abspath(data_root)}")
+    print(f"Target DB: {os.path.abspath(target_db)}")
+    print(f"Embedding model: {args.embedding_model}")
     
-    databases = get_available_databases()
+    databases = get_available_databases(data_root)
     
     if not databases:
-        print(f"✗ No databases found in {DATA_ROOT}")
+        print(f"✗ No databases found in {data_root}")
         exit(1)
     
     # Train all databases to production
     selected_databases = databases
-    target_db = CHROMA_DB
     
     print(f"\nMode: Train all databases")
     print(f"Databases ({len(databases)}): {', '.join(databases)}")
     print(f"Target: {target_db}")
     
-    confirm = input(f"\nProceed with training? (y/n): ").strip().lower()
+    confirm = "y" if args.yes else input(f"\nProceed with training? (y/n): ").strip().lower()
     
     if confirm != 'y':
         print("Training cancelled.")
         exit(0)
     
-    # Clear existing vector store if it exists
+    # Clear existing vector store if it exists to avoid duplicate/mixed collections.
     if os.path.exists(target_db):
-        confirm_clear = input(f"\n{target_db} already exists. Delete it? (y/n): ").strip().lower()
-        if confirm_clear == 'y':
+        if args.backup_existing:
+            maybe_backup_directory(target_db)
+
+        if args.yes:
             shutil.rmtree(target_db)
-            print(f"Deleted {target_db}")
+            print(f"Deleted existing target DB: {target_db}")
         else:
-            print("Cancelled. Existing vector store will be overwritten.")
+            confirm_clear = input(
+                f"\n{target_db} already exists. Delete it before retraining? (y/n): "
+            ).strip().lower()
+            if confirm_clear == 'y':
+                shutil.rmtree(target_db)
+                print(f"Deleted {target_db}")
+            else:
+                print("Cancelled. Keeping existing DB unchanged.")
+                exit(0)
     
     # Train vector store (separate collection for each database)
     try:
         script_start = time.time()
-        embeddings = get_embeddings()
+        embeddings = HuggingFaceEmbeddings(model_name=args.embedding_model)
         print(f"\nCreating embeddings and storing in production database...")
         print(f"Each database will have its own collection.\n")
         
@@ -148,7 +206,7 @@ if __name__ == "__main__":
         
         for db in selected_databases:
             db_start = time.time()
-            data_dir = os.path.join(DATA_ROOT, db)
+            data_dir = os.path.join(data_root, db)
             chunks = process_database_to_vectorstore(data_dir, database_name=db)
             
             # Create a separate collection for each database
@@ -174,8 +232,13 @@ if __name__ == "__main__":
         print(f"Vector store saved to: {os.path.abspath(target_db)}")
         print(f"Collections created: {', '.join([f'{db.lower()}_metadata' for db in selected_databases])}")
         print("\n💡 Next step: Compress and upload chroma_prod_db to HuggingFace Hub")
-        print("   python -c \"import shutil; shutil.make_archive('chroma_prod_db', 'zip', '.', 'chroma_prod_db')\"")
-        print("   hf upload bobo200612/near-chroma-prod-db ./chroma_prod_db.zip chroma_prod_db.zip --repo-type=dataset --commit-message 'xxxxx'")
+        archive_name = os.path.basename(os.path.normpath(target_db))
+        print(
+            f"   python -c \"import shutil; shutil.make_archive('{archive_name}', 'zip', '.', '{archive_name}')\""
+        )
+        print(
+            f"   hf upload bobo200612/near-chroma-prod-db ./{archive_name}.zip {archive_name}.zip --repo-type=dataset --commit-message 'xxxxx'"
+        )
             
     except Exception as e:
         print(f"\n✗ Error during training: {e}")

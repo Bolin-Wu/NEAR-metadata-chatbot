@@ -18,6 +18,7 @@ chroma_prod_db_backup_*/
 metadata_excels/
 *.xlsx  
 data/
+data_2026April/
 *.zip
 
 
