@@ -14,7 +14,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.documents import Document
 from langchain_core.runnables import RunnablePassthrough
 from langchain_groq import ChatGroq
-from langchain_openai import ChatOpenAI  # For xAI Grok
+from langchain_openai import ChatOpenAI  # For OpenAI-compatible endpoints
 from langchain_core.prompts import PromptTemplate
 from dotenv import load_dotenv
 import shutil
@@ -56,11 +56,12 @@ KNOWN_DATABASES = [
 
 # LLM Model Names (for consistency across the app)
 LLM_MODEL_GROQ = "Llama 3.1 8B (Groq)"
-LLM_MODEL_GROK = "Grok 4.1 Fast Reasoning (xAI)"
+LLM_MODEL_GPT = "GPT-5.4 Mini (Azure Foundry)"
 
 # LLM Model IDs (technical identifiers for API calls)
 GROQ_MODEL_ID = "llama-3.1-8b-instant"
-GROK_MODEL_ID = "grok-4-1-fast-reasoning"
+GPT_MODEL_ID = "gpt-5.4-mini"
+AZURE_FOUNDRY_BASE_URL = "https://llm-chatbot-api.cognitiveservices.azure.com/openai/v1/"
 
 # LLM Hyperparameters
 LLM_TEMPERATURE = 0.3           # Balanced: accurate answers with flexibility for general knowledge (0.0=deterministic, 1.0=creative)
@@ -82,9 +83,10 @@ except (FileNotFoundError, KeyError, AttributeError):
     GROQ_API_KEY = os.getenv("GROQ_api_key")
 
 try:
-    XAI_api_key = st.secrets["XAI_api_key"]
+    AZURE_api_key = st.secrets["AZURE_api_key"]
 except (FileNotFoundError, KeyError, AttributeError):
-    XAI_api_key = os.getenv("XAI_api_key")
+    AZURE_api_key = os.getenv("AZURE_api_key")
+    
 
 # Cloud storage URL for production vector database (optional)
 # Use HuggingFace Hub: huggingface_hub.download() with repo_id
@@ -775,14 +777,14 @@ def get_llm(model_name: str):
     Returns:
         Initialized LLM instance
     """
-    if model_name == LLM_MODEL_GROK:
-        if not XAI_api_key:
-            st.error("❌ XAI_api_key not configured")
+    if model_name == LLM_MODEL_GPT:
+        if not AZURE_api_key:
+            st.error("❌ AZURE_api_key not configured")
             st.stop()
         return ChatOpenAI(
-            api_key=XAI_api_key,
-            model=GROK_MODEL_ID,
-            base_url="https://api.x.ai/v1",
+            api_key=AZURE_api_key,
+            model=GPT_MODEL_ID,
+            base_url=AZURE_FOUNDRY_BASE_URL,
             temperature=LLM_TEMPERATURE,
         )
     else:  # Default to Groq Llama 3.1 8B
@@ -881,7 +883,7 @@ with st.sidebar:
     
     # LLM Model Selection
     st.subheader("Select LLM Model")
-    available_models = [LLM_MODEL_GROQ, LLM_MODEL_GROK]
+    available_models = [LLM_MODEL_GROQ, LLM_MODEL_GPT]
     selected_model = st.radio(
         "Choose LLM model:",
         options=available_models,
@@ -890,8 +892,8 @@ with st.sidebar:
     )
     st.session_state.selected_llm_model = selected_model
     
-    if selected_model == LLM_MODEL_GROK:
-        st.caption(f"💪 Supports larger context and takes longer time to respond")
+    if selected_model == LLM_MODEL_GPT:
+        st.caption("🧠 Azure Foundry GPT-5.4 Mini for stronger reasoning on metadata questions")
     else:
         st.caption("⚡ Faster responses with slightly smaller context window (may miss some category info)")
     
