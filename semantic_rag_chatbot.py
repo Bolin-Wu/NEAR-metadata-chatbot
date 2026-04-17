@@ -88,6 +88,15 @@ try:
 except:
     HUGGINGFACE_REPO_ID = os.getenv("HUGGINGFACE_REPO_ID")
 
+# Beta release settings (branch-scoped)
+BETA_RELEASE_LABEL = "v1.4 beta"
+INTERNAL_BETA_ONLY = True
+
+try:
+    INTERNAL_BETA_PASSWORD = st.secrets.get("INTERNAL_BETA_PASSWORD")
+except Exception:
+    INTERNAL_BETA_PASSWORD = os.getenv("INTERNAL_BETA_PASSWORD")
+
 # ── Functions ─────────────────────────────────────────────────────────────────
 
 def _find_table_blocks(text):
@@ -806,11 +815,47 @@ def get_llm():
     )
 
 
+def enforce_internal_beta_access() -> None:
+    """Optional password gate for internal beta deployments."""
+    if not INTERNAL_BETA_ONLY:
+        return
+
+    if st.session_state.get("beta_auth_ok", False):
+        return
+
+    st.warning("🔒 Internal beta access only")
+
+    if not INTERNAL_BETA_PASSWORD:
+        st.info(
+            "No INTERNAL_BETA_PASSWORD is configured. "
+            "Set it in Streamlit secrets to enforce internal-only access."
+        )
+        return
+
+    entered_password = st.text_input(
+        "Enter internal beta password:",
+        type="password",
+        key="beta_password_input",
+    )
+    unlock_clicked = st.button("Unlock beta", key="beta_unlock_button")
+
+    if unlock_clicked:
+        if entered_password == INTERNAL_BETA_PASSWORD:
+            st.session_state.beta_auth_ok = True
+            st.rerun()
+        else:
+            st.error("Invalid password.")
+
+    st.stop()
+
+
 
 
 # ── Main App ──────────────────────────────────────────────────────────────────
 
 st.title("NEAR Metadata Chatbot")
+st.caption(f"🧪 Internal Preview • {BETA_RELEASE_LABEL}")
+enforce_internal_beta_access()
 
 # ── Initialize Session State (MUST BE FIRST) ──────────────────────────────────
 # Initialize all session state variables before any code accesses them
