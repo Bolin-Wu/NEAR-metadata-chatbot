@@ -1010,11 +1010,7 @@ with st.sidebar:
     # Changelog
     with st.expander("📋 What's New"):
         st.markdown("""
-        **v1.3.1** – Exact Variable Lookup
-        - Queries like "what is BAS1_H4?" now find variables via direct metadata match
-        - Background retrieval enriched with matched variable's source & label
-        
-        [View all previous releases →](https://github.com/Bolin-Wu/NEAR-metadata-chatbot/releases)
+        **v1.4 beta** – Allow multiple database selection, add harmonization suggestion.
         """)
 
 # Add disclaimer and tip about reference information
