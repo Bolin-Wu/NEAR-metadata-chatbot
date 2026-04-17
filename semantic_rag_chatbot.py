@@ -13,7 +13,6 @@ from langchain_chroma import Chroma
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.documents import Document
 from langchain_core.runnables import RunnablePassthrough
-from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI  # For OpenAI-compatible endpoints
 from langchain_core.prompts import PromptTemplate
 from dotenv import load_dotenv
@@ -55,11 +54,9 @@ KNOWN_DATABASES = [
 ]
 
 # LLM Model Names (for consistency across the app)
-LLM_MODEL_GROQ = "Llama 3.1 8B (Groq)"
 LLM_MODEL_GPT = "GPT-5.4 Mini (Azure Foundry)"
 
 # LLM Model IDs (technical identifiers for API calls)
-GROQ_MODEL_ID = "llama-3.1-8b-instant"
 GPT_MODEL_ID = "gpt-5.4-mini"
 AZURE_FOUNDRY_BASE_URL = "https://llm-chatbot-api.cognitiveservices.azure.com/openai/v1/"
 
@@ -69,19 +66,15 @@ LLM_TEMPERATURE = 0.3           # Balanced: accurate answers with flexibility fo
 # Retrieval Parameters
 RETRIEVAL_K_BACKGROUND = 5      # Top-5 docs for cohort background context
 RETRIEVAL_K_CONTEXT = 60        # Top-60 docs for variable definitions (increased for better category capture)
-RETRIEVAL_K_CONTEXT_GROQ = 30   # Reduced for Groq free tier to stay within 6000 TPM token limit
-RETRIEVAL_K_CONTEXT_BROAD = 80  # Higher recall for broad recommendation queries
-RETRIEVAL_K_CONTEXT_BROAD_GROQ = 40
 EXACT_MATCH_LIMIT = 3          # Exact variable-name hits to merge ahead of semantic results
 BACKGROUND_ENRICH_FALLBACK_DOCS = 3  # Fallback docs used when no exact variable match is found
 BACKGROUND_ENRICH_MAX_DOCS = 3       # Max docs used to extract enrichment terms
+MAX_SELECTED_DATABASES_GPT = 6       # GPT path can handle broader multi-database context
+MERGED_CONTEXT_K_MAX_GPT = 48        # Global merged context cap for GPT
+BACKGROUND_PER_DB_K = 2              # Small per-database budget for cohort background
+BACKGROUND_GLOBAL_MAX_GPT = 10
 
 # Safe way to get API keys
-try:
-    GROQ_API_KEY = st.secrets["GROQ_api_key"]
-except (FileNotFoundError, KeyError, AttributeError):
-    GROQ_API_KEY = os.getenv("GROQ_api_key")
-
 try:
     AZURE_api_key = st.secrets["AZURE_api_key"]
 except (FileNotFoundError, KeyError, AttributeError):
@@ -462,63 +455,50 @@ def get_available_databases():
         st.error(f"❌ Could not load databases: {e}")
         return []
 
-# Initialize vectorstore as None (will be set from cache on database selection)
-if "vectorstore" not in st.session_state:
-    st.session_state.vectorstore = None
-    st.session_state.selected_database = None
 
-# Initialize vectorstores cache (preload all databases on first access)
-if "vectorstores_cache" not in st.session_state:
-    st.session_state.vectorstores_cache = {}
-    st.session_state.vectorstores_loading = False
 
-# Initialize latest response tables for export
-if "latest_tables_with_headers" not in st.session_state:
-    st.session_state.latest_tables_with_headers = []
-
-# Initialize selected LLM model
-if "selected_llm_model" not in st.session_state:
-    st.session_state.selected_llm_model = LLM_MODEL_GROQ
-
-def get_complete_background(vectorstore):
-    """Retrieve all database description chunks via semantic search.
+def get_complete_background(vectorstores, llm_model=None):
+    """Retrieve database description chunks across selected collections.
     
     Uses semantic search to find and return all chunks tagged as database descriptions,
     providing comprehensive cohort background information as a fallback when query-specific
     background retrieval yields no results.
     """
-    if vectorstore is None:
+    if not vectorstores:
         return ""
     
     try:
-        retriever = vectorstore.as_retriever(
-            search_kwargs={
-                "k": 2,
-                "filter": {"type": "database_description"}
-            }
-        )
-        docs = retriever.invoke("database description overview cohort study information")
-        
-        descriptions = [doc.page_content for doc in docs]
-        
-        return "\n\n".join(descriptions) if descriptions else ""
+        background_global_cap = BACKGROUND_GLOBAL_MAX_GPT
+
+        all_groups = []
+        for vectorstore in vectorstores:
+            retriever = vectorstore.as_retriever(
+                search_kwargs={
+                    "k": BACKGROUND_PER_DB_K,
+                    "filter": {"type": "database_description"}
+                }
+            )
+            docs = retriever.invoke("database description overview cohort study information")
+            all_groups.append(docs)
+
+        merged_docs = interleave_document_groups(all_groups)
+        merged_docs = deduplicate_documents(merged_docs)[:background_global_cap]
+        descriptions = [doc.page_content for doc in merged_docs]
+
+        return "\n\n---\n\n".join(descriptions) if descriptions else ""
     except Exception as e:
         logger.error(f"Could not retrieve database description: {e}")
         return ""
 
-def get_relevant_background(query, vectorstore, context_docs=None):
+def get_relevant_background(query, vectorstores, llm_model=None, context_docs=None):
     """Retrieve cohort background information relevant to the user's query."""
-    if vectorstore is None:
+    if not vectorstores:
         return ""
     
     try:
         # Perform semantic search on the entire collection
-        retriever = vectorstore.as_retriever(
-            search_kwargs={
-                "k": RETRIEVAL_K_BACKGROUND,
-                "filter": {"type": "database_description"}
-            }
-        )
+        background_global_cap = BACKGROUND_GLOBAL_MAX_GPT
+        background_per_db_k = max(1, min(RETRIEVAL_K_BACKGROUND, BACKGROUND_PER_DB_K))
         background_query = query
 
         # If the user query looks like an exact variable code, enrich background
@@ -556,41 +536,29 @@ def get_relevant_background(query, vectorstore, context_docs=None):
             if enrichment_terms:
                 background_query = f"{query} {' '.join(enrichment_terms)}"
 
-        docs = retriever.invoke(background_query)
-        
-        background_docs = docs
+        background_groups = []
+        for vectorstore in vectorstores:
+            retriever = vectorstore.as_retriever(
+                search_kwargs={
+                    "k": background_per_db_k,
+                    "filter": {"type": "database_description"}
+                }
+            )
+            docs = retriever.invoke(background_query)
+            background_groups.append(docs)
+
+        background_docs = interleave_document_groups(background_groups)
+        background_docs = deduplicate_documents(background_docs)[:background_global_cap]
         
         if not background_docs:
-            return get_complete_background(vectorstore)
+            return get_complete_background(vectorstores, llm_model)
         
         return "\n\n---\n\n".join(
             [doc.page_content for doc in background_docs]
         )
     except Exception as e:
         logger.error(f"Error retrieving background: {e}")
-        return get_complete_background(vectorstore)
-
-
-def is_broad_variable_query(query: str) -> bool:
-    """Heuristic detector for broad recommendation-style variable queries."""
-    if not query:
-        return False
-
-    query_lower = query.lower()
-    broad_markers = [
-        "recommend",
-        "suggest",
-        "construct",
-        "build",
-        "scale",
-        "score",
-        "index",
-        "all variables",
-        "overview",
-        "list variables",
-    ]
-
-    return any(marker in query_lower for marker in broad_markers)
+        return get_complete_background(vectorstores, llm_model)
 
 
 def extract_variable_name_candidates(query: str) -> list[str]:
@@ -659,6 +627,45 @@ def deduplicate_documents(documents: list[Document]) -> list[Document]:
     return unique_docs
 
 
+def interleave_document_groups(document_groups: list[list[Document]]) -> list[Document]:
+    """Interleave docs from multiple groups to balance coverage across databases."""
+    if not document_groups:
+        return []
+
+    merged = []
+    max_len = max((len(group) for group in document_groups), default=0)
+    for idx in range(max_len):
+        for group in document_groups:
+            if idx < len(group):
+                merged.append(group[idx])
+
+    return merged
+
+
+def get_retrieval_budget(llm_model: str | None) -> dict:
+    """Return model-aware retrieval caps for multi-database querying."""
+    max_selected_databases = MAX_SELECTED_DATABASES_GPT
+    merged_context_cap = MERGED_CONTEXT_K_MAX_GPT
+
+    return {
+        "max_selected_databases": max_selected_databases,
+        "merged_context_cap": merged_context_cap,
+    }
+
+
+def safe_query_vectorstores(vectorstores: list, llm_model: str | None) -> list:
+    """Cap selected vectorstores based on model budget to avoid token blowups."""
+    if not vectorstores:
+        return []
+
+    budget = get_retrieval_budget(llm_model)
+    max_selected_databases = budget["max_selected_databases"]
+    if len(vectorstores) <= max_selected_databases:
+        return vectorstores
+
+    return vectorstores[:max_selected_databases]
+
+
 def exact_variable_name_lookup(query: str, vectorstore) -> list[Document]:
     """Look up variable documents by exact metadata match before semantic search."""
     if vectorstore is None:
@@ -709,49 +716,67 @@ def exact_variable_name_lookup(query: str, vectorstore) -> list[Document]:
 
     return exact_docs
 
-def filter_and_organize_context(query, vectorstore, llm_model=None):
+def filter_and_organize_context(query, vectorstores, llm_model=None):
     """Retrieve variable definitions relevant to the query.
     
     Returns context with source information for each variable.
     """
-    if vectorstore is None:
+    if not vectorstores:
         return "", []
     
     try:
-        # Adjust retrieval depth based on query intent and LLM model.
-        broad_query = is_broad_variable_query(query)
-        if llm_model == LLM_MODEL_GROQ:
-            k_context = RETRIEVAL_K_CONTEXT_BROAD_GROQ if broad_query else RETRIEVAL_K_CONTEXT_GROQ
-        else:
-            k_context = RETRIEVAL_K_CONTEXT_BROAD if broad_query else RETRIEVAL_K_CONTEXT
+        # Use model-aware retrieval caps for stable multi-database behavior.
+        budget = get_retrieval_budget(llm_model)
+        original_count = len(vectorstores)
+        vectorstores = safe_query_vectorstores(vectorstores, llm_model)
+        if len(vectorstores) < original_count:
+            st.toast(
+                f"⚠️ Querying {len(vectorstores)} of {original_count} selected databases "
+                f"to stay within {llm_model} context limits. Switch to GPT for broader coverage.",
+                icon="⚠️",
+            )
+
+        k_context_base = RETRIEVAL_K_CONTEXT
+
+        per_db_k = max(4, int(k_context_base / max(1, len(vectorstores))))
+        merged_context_cap = budget["merged_context_cap"]
         
-        # Increase retrieval depth to capture more complete category information
-        # especially for broader queries like "recommend variables for CIRS"
-        retriever = vectorstore.as_retriever(
-            search_kwargs={
-                "k": k_context,
-                "filter": {"type": "variable_definitions"}
-            }
-        )
-        docs = retriever.invoke(query)
-        exact_docs = exact_variable_name_lookup(query, vectorstore)
-        var_defs = deduplicate_documents(exact_docs + docs)
+        semantic_groups = []
+        exact_docs = []
+
+        for vectorstore in vectorstores:
+            retriever = vectorstore.as_retriever(
+                search_kwargs={
+                    "k": per_db_k,
+                    "filter": {"type": "variable_definitions"}
+                }
+            )
+            semantic_groups.append(retriever.invoke(query))
+            exact_docs.extend(exact_variable_name_lookup(query, vectorstore))
+
+        docs = interleave_document_groups(semantic_groups)
+        var_defs = deduplicate_documents(exact_docs + docs)[:merged_context_cap]
         
         # Debug logging: show how many documents were retrieved
         logger.debug(
-            f"Query: '{query}' | BroadQuery: {broad_query} | k_context: {k_context} "
-            f"| Semantic docs: {len(docs)} | Exact docs: {len(exact_docs)} "
-            f"| Final docs: {len(var_defs)} | Model: {llm_model}"
+            f"Query: '{query}' | per_db_k: {per_db_k} "
+            f"| DBs: {len(vectorstores)} | Semantic docs: {len(docs)} "
+            f"| Exact docs: {len(exact_docs)} | Final docs: {len(var_defs)} "
+            f"| merged_cap: {merged_context_cap} | Model: {llm_model}"
         )
         
         # Include source information in context
         context_parts = []
         for doc in var_defs:
             source = doc.metadata.get("source", "Unknown")
+            database = doc.metadata.get("database")
             variable_name = doc.metadata.get("variable_name")
             # Remove .xml suffix if present
             if source.endswith(".xml"):
                 source = source[:-4]
+
+            if database:
+                source = f"{database}:{source}"
 
             if variable_name:
                 context_parts.append(f"[Source: {source} | Variable: {variable_name}]\n{doc.page_content}")
@@ -768,34 +793,17 @@ def filter_and_organize_context(query, vectorstore, llm_model=None):
         # Note: Don't show error in UI here since this is called during response generation
         return "", []
 
-def get_llm(model_name: str):
-    """Initialize the selected LLM model.
-    
-    Args:
-        model_name: Name of the model to initialize
-    
-    Returns:
-        Initialized LLM instance
-    """
-    if model_name == LLM_MODEL_GPT:
-        if not AZURE_api_key:
-            st.error("❌ AZURE_api_key not configured")
-            st.stop()
-        return ChatOpenAI(
-            api_key=AZURE_api_key,
-            model=GPT_MODEL_ID,
-            base_url=AZURE_FOUNDRY_BASE_URL,
-            temperature=LLM_TEMPERATURE,
-        )
-    else:  # Default to Groq Llama 3.1 8B
-        if not GROQ_API_KEY:
-            st.error("❌ GROQ_api_key not configured")
-            st.stop()
-        return ChatGroq(
-            groq_api_key=GROQ_API_KEY,
-            model_name=GROQ_MODEL_ID,
-            temperature=LLM_TEMPERATURE,
-        )
+def get_llm():
+    """Initialize the Azure GPT model."""
+    if not AZURE_api_key:
+        st.error("❌ AZURE_api_key not configured")
+        st.stop()
+    return ChatOpenAI(
+        api_key=AZURE_api_key,
+        model=GPT_MODEL_ID,
+        base_url=AZURE_FOUNDRY_BASE_URL,
+        temperature=LLM_TEMPERATURE,
+    )
 
 
 
@@ -803,6 +811,24 @@ def get_llm(model_name: str):
 # ── Main App ──────────────────────────────────────────────────────────────────
 
 st.title("NEAR Metadata Chatbot")
+
+# ── Initialize Session State (MUST BE FIRST) ──────────────────────────────────
+# Initialize all session state variables before any code accesses them
+if "vectorstore" not in st.session_state:
+    st.session_state.vectorstore = None
+    st.session_state.selected_database = None
+if "selected_databases" not in st.session_state:
+    st.session_state.selected_databases = []
+if "vectorstores_cache" not in st.session_state:
+    st.session_state.vectorstores_cache = {}
+    st.session_state.vectorstores_loading = False
+if "latest_tables_with_headers" not in st.session_state:
+    st.session_state.latest_tables_with_headers = []
+if "selected_llm_model" not in st.session_state:
+    st.session_state.selected_llm_model = LLM_MODEL_GPT
+if "available_databases_loaded" not in st.session_state:
+    st.session_state.available_databases_loaded = False
+    st.session_state.available_databases = []
 
 # Verify HUGGINGFACE_REPO_ID is available before initializing database
 if not HUGGINGFACE_REPO_ID:
@@ -813,7 +839,7 @@ if not HUGGINGFACE_REPO_ID:
 initialize_production_db()
 
 # Initialize available databases (after database is ready)
-if "available_databases_loaded" not in st.session_state:
+if not st.session_state.available_databases_loaded:
     with st.spinner("Discovering available databases..."):
         st.session_state.available_databases = get_available_databases()
         st.session_state.available_databases_loaded = True
@@ -858,44 +884,79 @@ with st.sidebar:
     st.markdown("---")
     
     # Database selection
-    st.subheader("Select Database")
+    st.subheader("Select Database(s)")
     
     if st.session_state.available_databases:
-        selected_database = st.radio(
-            "Choose a database to query:",
-            options=sorted(st.session_state.available_databases),
-            index=0,
-            key="database_radio"
-        )
-        
-        # Switch to selected database (from cache - instant!)
-        if selected_database != st.session_state.selected_database:
-            if selected_database in st.session_state.vectorstores_cache:
-                st.session_state.vectorstore = st.session_state.vectorstores_cache[selected_database]
-                st.session_state.selected_database = selected_database
-            else:
-                st.error(f"Vector store for {selected_database} not available")
+        sorted_databases = sorted(st.session_state.available_databases)
+        default_databases = st.session_state.selected_databases or sorted_databases[:1]
+        default_databases = [db for db in default_databases if db in sorted_databases]
+        if not default_databases and sorted_databases:
+            default_databases = sorted_databases[:1]
+
+        llm_model_for_caps = st.session_state.get("selected_llm_model", LLM_MODEL_GPT)
+        max_selected = get_retrieval_budget(llm_model_for_caps)["max_selected_databases"]
+
+        current_selected_databases = []
+        for db_name in sorted_databases:
+            checkbox_key = f"database_toggle_{db_name}"
+            if checkbox_key in st.session_state and st.session_state[checkbox_key]:
+                current_selected_databases.append(db_name)
+
+        trimmed_database_selection = False
+        if len(current_selected_databases) > max_selected:
+            for db_name in current_selected_databases[max_selected:]:
+                st.session_state[f"database_toggle_{db_name}"] = False
+            trimmed_database_selection = True
+
+        st.caption("Toggle databases directly below.")
+        for db_name in sorted_databases:
+            checkbox_key = f"database_toggle_{db_name}"
+            if checkbox_key not in st.session_state:
+                st.session_state[checkbox_key] = db_name in default_databases
+
+            st.checkbox(db_name, key=checkbox_key)
+
+        selected_databases = [
+            db_name for db_name in sorted_databases
+            if st.session_state.get(f"database_toggle_{db_name}", False)
+        ]
+
+        if trimmed_database_selection:
+            st.caption(
+                f"You can select up to {max_selected} databases with {llm_model_for_caps}. "
+                f"Extra selections were turned off to stay within context limits."
+            )
+
+        loaded_databases = []
+        selected_vectorstores = []
+        for db_name in selected_databases:
+            vectorstore = st.session_state.vectorstores_cache.get(db_name)
+            if vectorstore is None:
+                st.warning(f"Vector store for {db_name} not available")
+                continue
+            loaded_databases.append(db_name)
+            selected_vectorstores.append(vectorstore)
+        if len(loaded_databases) > max_selected:
+            loaded_databases = loaded_databases[:max_selected]
+            selected_vectorstores = selected_vectorstores[:max_selected]
+            st.caption(
+                f"Using first {max_selected} selected databases for {llm_model_for_caps} to stay within context limits."
+            )
+
+        st.session_state.selected_databases = loaded_databases
+        st.session_state.selected_database = ", ".join(loaded_databases)
+        st.session_state.selected_vectorstores = selected_vectorstores
+        st.session_state.vectorstore = selected_vectorstores[0] if selected_vectorstores else None
         
     else:
         st.warning("No databases available")
     
     st.markdown("---")
     
-    # LLM Model Selection
-    st.subheader("Select LLM Model")
-    available_models = [LLM_MODEL_GROQ, LLM_MODEL_GPT]
-    selected_model = st.radio(
-        "Choose LLM model:",
-        options=available_models,
-        index=0,
-        key="llm_radio"
-    )
-    st.session_state.selected_llm_model = selected_model
-    
-    if selected_model == LLM_MODEL_GPT:
-        st.caption("🧠 Azure Foundry GPT-5.4 Mini for stronger reasoning on metadata questions")
-    else:
-        st.caption("⚡ Faster responses with slightly smaller context window (may miss some category info)")
+    # Fixed model (GPT-only)
+    st.subheader("LLM Model")
+    st.session_state.selected_llm_model = LLM_MODEL_GPT
+    st.caption("🧠 Azure Foundry GPT-5.4 Mini")
     
     st.markdown("---")
     
@@ -923,7 +984,7 @@ with st.sidebar:
 st.info("""
 **ℹ️ Disclaimer:** This chatbot provides a quick overview based on NEAR metadata submitted to Maelstrom. Some variables may be unavailable, including derived variables, registry data, or recent updates. For complete and validated metadata, refer to the [Maelstrom catalogue](https://www.maelstrom-research.org/search#lists?type=studies&query=network(in(Mica_network.id,near)),variable(limit(0,20)),study(in(Mica_study.className,Study),limit(0,20))) or contact the NEAR team.
 
-**💡 Tip:** If you're not satisfied with the results, try searching again with different wording or switch AI models. The same question may yield different results due to the nature of AI-powered responses.
+**💡 Tip:** This chatbot works best with one-shot queries and does not keep conversational memory. Ask complete standalone questions (avoid follow-up questions that depend on previous turns). If you're not satisfied with the results, try searching again with different wording. The same question may yield different results due to the nature of AI-powered responses.
 """)
 
 # Display search suggestions
@@ -938,7 +999,7 @@ with col2:
     st.caption("- Recommend variables for constructing CIRS.")
     st.caption("- Suggest variables for frailty index.")
 with col3:
-    st.caption("- How do you assess mental health?")
+    st.caption("- Recommend blood pressure variables for hypertension analysis.")
     st.caption("- List ADL variables and map each to core ADL, ADL+IADL, and wave-specific sets.")
     st.caption("- Give all bathing, dressing, toileting, transferring variables with source and categories.")
 
@@ -951,40 +1012,52 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-placeholder_text = f"Ask about {st.session_state.selected_database} metadata..."
+selected_dbs_for_placeholder = st.session_state.get("selected_databases") or []
+if len(selected_dbs_for_placeholder) == 1:
+    db_scope_label = selected_dbs_for_placeholder[0]
+elif len(selected_dbs_for_placeholder) > 1:
+    db_scope_label = f"{len(selected_dbs_for_placeholder)} selected databases"
+else:
+    db_scope_label = "selected databases"
+
+placeholder_text = f"Ask one complete question about {db_scope_label} metadata..."
 if prompt := st.chat_input(placeholder_text):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        vectorstore = st.session_state.get("vectorstore")
-        if vectorstore is None:
+        selected_vectorstores = st.session_state.get("selected_vectorstores") or []
+        if not selected_vectorstores:
             st.warning("Vector store not available!")
             response = ""
         else:
             with st.spinner("Thinking..."):
-                # Get the selected LLM model
-                llm = get_llm(st.session_state.selected_llm_model)
+                # Get the GPT model
+                llm = get_llm()
                 
                 # Display which model is being used
-                st.caption(f"🔧 Using: {st.session_state.selected_llm_model}")
+                st.caption(f"🔧 Using: {LLM_MODEL_GPT}")
                 
-                # Get context (already filtered to selected database via collection)
+                # Get context merged from selected database collections.
                 # Returns both context text and document list
-                context, context_docs = filter_and_organize_context(prompt, vectorstore, st.session_state.selected_llm_model)
+                context, context_docs = filter_and_organize_context(
+                    prompt,
+                    selected_vectorstores,
+                    LLM_MODEL_GPT,
+                )
 
                 # Avoid blank assistant output when retrieval returns no variable chunks.
                 if not context.strip():
                     response = (
-                        "I could not find matching variable definitions for that query in the selected database. "
+                        "I could not find matching variable definitions for that query in the selected database scope. "
                         "Try a more specific term (for example: systolic, diastolic, hypertension, blood pressure)."
                     )
                     logger.warning(
-                        "Empty retrieval context for query '%s' in database '%s' using model '%s'",
+                        "Empty retrieval context for query '%s' in databases '%s' using model '%s'",
                         prompt,
-                        st.session_state.get("selected_database"),
-                        st.session_state.selected_llm_model,
+                        st.session_state.get("selected_databases"),
+                        LLM_MODEL_GPT,
                     )
                 else:
 
@@ -1008,74 +1081,86 @@ if prompt := st.chat_input(placeholder_text):
                 {question}
 
                 ### Your Response Instructions:
-                - Treat every question as a single-turn request based only on the current question and provided metadata context
-                - DO NOT include follow-up offers such as "If you want, I can...", "Would you like me to...", or "I can also..."
-                - Group related variables by theme
-                - Start with a clear, natural explanation of the topic based on the related cohort background
-                - Use your own words to describe what the variables measure
-                - Then, present the variable information in a markdown table with these columns:
+                     - Treat every question as a single-turn request based only on the current question and provided metadata context
+                     - DO NOT include follow-up offers such as "If you want, I can...", "Would you like me to...", or "I can also..."
+                     - Start with a clear, natural explanation of the topic based on the related cohort background
+                     - Use your own words to describe what the variables measure
                 
-                | Variable Name | Label | Categories | Source |
-                |---|---|---|---|
-                | variable_name | What it measures in plain English | Category values if applicable | source_file_name |
+                     **CRITICAL: Organize results by database** (use database name extracted from the Source field):
+                     - Create a separate section for each database using the format: `## Database Name`
+                     - Under each database section, present variables in a markdown table with these columns:
                 
-                ================================================================
-                CRITICAL RULES FOR EXTRACTING DATA (READ CAREFULLY):
-                ================================================================
+                     | Variable Name | Label | Categories | Source |
+                     |---|---|---|---|
+                     | variable_name | What it measures in plain English | Category values if applicable | source_file_name |
                 
-                1. VARIABLE NAMES (Column 1):
-                   - EXTRACT EXACTLY the text that appears after "Variable: " in the source data
-                   - Copy-paste the exact variable name - do NOT modify, shorten, or translate
-                   - Do NOT use field names like "Description" or "Label" instead
-                   - FORBIDDEN: Do NOT invent variable names not in the source
-                   - EXAMPLE RIGHT: Source has "Variable: löpnr". Write "löpnr" exactly
-                   - EXAMPLE WRONG: Inventing "participant_age" when source only has "löpnr"
+                     - List all variables found in each database before moving to the next database
+                     - Group related variables by theme WITHIN each database section
+                
+                     ================================================================
+                     CRITICAL RULES FOR EXTRACTING DATA (READ CAREFULLY):
+                     ================================================================
+                
+                     1. VARIABLE NAMES (Column 1):
+                         - EXTRACT EXACTLY the text that appears after "Variable: " in the source data
+                         - Copy-paste the exact variable name - do NOT modify, shorten, or translate
+                         - Do NOT use field names like "Description" or "Label" instead
+                         - FORBIDDEN: Do NOT invent variable names not in the source
+                         - EXAMPLE RIGHT: Source has "Variable: löpnr". Write "löpnr" exactly
+                         - EXAMPLE WRONG: Inventing "participant_age" when source only has "löpnr"
 
-                2. LABELS (Column 2):
-                   - Use the "Label:" field value EXACTLY as written in source data
-                   - Do NOT shorten, paraphrase, or interpret the label
+                     2. LABELS (Column 2):
+                         - Use the "Label:" field value EXACTLY as written in source data
+                         - Do NOT shorten, paraphrase, or interpret the label
 
-                3. CATEGORIES (Column 3):
-                   - Extract category values EXACTLY as they appear in the source data, typically in a "Categories:" field
-                   - FORMAT STRICTLY as: "1=value1, 2=value2, 3=value3" (number=description, comma-separated, NO SEMICOLONS)
-                   - If no categories exist, write "N/A"
-                   - Do NOT invent category mappings not in the source
+                     3. CATEGORIES (Column 3):
+                         - Extract category values EXACTLY as they appear in the source data, typically in a "Categories:" field
+                         - FORMAT STRICTLY as: "1=value1, 2=value2, 3=value3" (number=description, comma-separated, NO SEMICOLONS)
+                         - If no categories exist, write "N/A"
+                         - Do NOT invent category mappings not in the source
 
-                4. SOURCE (Column 4):
-                   - Extract from the header "[Source: filename | Variable: variable_name]" at the start of each block
-                   - Must be present for EVERY variable (required field)
-                   - Use the exact source filename provided
+                     4. SOURCE (Column 4):
+                         - Extract from the header "[Source: filename | Variable: variable_name]" at the start of each block
+                         - Must be present for EVERY variable (required field)
+                         - Use the exact source filename provided
 
-                5. DEDUPLICATION:
-                   - Variables with identical Label and Categories are the same variable collected across different time points
-                   - COMBINES these into a single row with all variable names and sources listed
-                   - This provides visibility into data collection across waves while avoiding redundancy
+                     5. DATABASE ORGANIZATION:
+                         - Extract the database name from the Source field (appears before the colon in "[Source: DATABASE:filename | ...]")
+                         - If database name is not explicitly prefixed, extract from source filename context
+                         - Create separate `## Database Name` headers for each database
+                         - Keep all variables from one database grouped together
 
-                6. VALIDATION (CRITICAL - MUST FOLLOW):
-                   - EVERY row must have ALL 4 columns completely filled (NO EMPTY CELLS)
-                   - NEVER pad rows with empty cells or partial data
-                   - Every variable name must come from the source data
-                   - If data is missing from source, DO NOT hallucinate it
-                   - Double-check: Each variable in your table should be traceable to the source context
-                   - If the last row is incomplete, DELETE IT and end the table cleanly
+                     6. DEDUPLICATION:
+                         - Variables with identical Label and Categories within the SAME database are the same variable collected across different time points
+                         - COMBINES these into a single row with all variable names and sources listed
+                         - This provides visibility into data collection across waves while avoiding redundancy
+
+                     7. VALIDATION (CRITICAL - MUST FOLLOW):
+                         - EVERY row must have ALL 4 columns completely filled (NO EMPTY CELLS)
+                         - NEVER pad rows with empty cells or partial data
+                         - Every variable name must come from the source data
+                         - If data is missing from source, DO NOT hallucinate it
+                         - Double-check: Each variable in your table should be traceable to the source context
+                         - If the last row is incomplete, DELETE IT and end the table cleanly
                 
-                DETAILED EXAMPLES OF CORRECT FORMAT:
+                     DETAILED EXAMPLES OF CORRECT FORMAT (organized by database):
                 
-                Example 1 - Demographics in SNAC-K:
-                "In SNAC-K, several variables measure basic demographics. Each participant has a unique identifier and recorded biological sex."
+                     ## Betula
+                     "In Betula, several variables measure basic demographics and cognition."
                 
-                | Variable Name | Label | Categories | Source |
-                |---|---|---|---|
-                | löpnr | Unique participant identifier number | N/A | SNAC_K_Baseline |
-                | kön | Participant's biological sex | 1=man, 2=woman | SNAC_K_Baseline |
+                     | Variable Name | Label | Categories | Source |
+                     |---|---|---|---|
+                     | ID | Participant identifier | N/A | Betula_Demographics |
+                     | age | Age in years | N/A | Betula_Demographics |
+                     | memory_score | Score on memory test | N/A | Betula_Cognition |
                 
-                Example 2 - Physical Measurements:
-                "Height and weight are measured at baseline assessment."
+                     ## SNAC-K
+                     "In SNAC-K, demographics are recorded with biological sex information."
                 
-                | Variable Name | Label | Categories | Source |
-                |---|---|---|---|
-                | height_cm | Height in centimeters | N/A | H70_Baseline_Form |
-                | weight_kg | Body weight in kilograms | N/A | H70_Baseline_Form |
+                     | Variable Name | Label | Categories | Source |
+                     |---|---|---|---|
+                     | löpnr | Unique participant identifier number | N/A | SNAC_K_Baseline |
+                     | kön | Participant's biological sex | 1=man, 2=woman | SNAC_K_Baseline |
 
                 Answer:"""
 
@@ -1084,9 +1169,17 @@ if prompt := st.chat_input(placeholder_text):
                         input_variables=["cohort_background", "context", "question"]
                     )
 
+                    # Capture session state values before passing to chain (LangChain runs lambdas in different context)
+                    current_llm_model = LLM_MODEL_GPT
+
                     rag_chain = (
                         {
-                            "cohort_background": lambda user_query: get_relevant_background(user_query, vectorstore, context_docs),
+                            "cohort_background": lambda user_query: get_relevant_background(
+                                user_query,
+                                selected_vectorstores,
+                                current_llm_model,
+                                context_docs,
+                            ),
                             "context": lambda _: context,
                             "question": RunnablePassthrough()
                         }
@@ -1098,7 +1191,7 @@ if prompt := st.chat_input(placeholder_text):
                     try:
                         logger.debug(f"Starting LLM invocation with query: {prompt[:100]}...")
                         logger.debug(f"Context length: {len(context)} chars, {len(context_docs)} docs")
-                        logger.debug(f"Using model: {st.session_state.selected_llm_model}")
+                        logger.debug(f"Using model: {current_llm_model}")
                         response = rag_chain.invoke(prompt)
                         logger.debug(f"LLM Response received (first 500 chars): {response[:500]}")
                     except Exception as e:
@@ -1107,18 +1200,17 @@ if prompt := st.chat_input(placeholder_text):
                         logger.exception("Full exception traceback:")
                         
                         # Check for token limit exceeded error
-                        current_model = st.session_state.selected_llm_model
                         if "rate_limit_exceeded" in error_str and "tokens" in error_str.lower():
-                            st.error(f"⚠️ Request too large for {current_model}. Try asking about a smaller subset of variables.")
+                            st.error(f"⚠️ Request too large for {current_llm_model}. Try asking about a smaller subset of variables.")
                             response = ""
                         elif "rate_limit" in str(e).lower() or "429" in str(e):
-                            st.error(f"⚠️ Rate limit reached for {current_model}. Please try again in a few moments.")
+                            st.error(f"⚠️ Rate limit reached for {current_llm_model}. Please try again in a few moments.")
                             response = ""
                         else:
                             st.error(f"Error: {str(e)}")
                             response = (
                                 "I ran into an issue while generating the answer. "
-                                "Please try again, switch model, or narrow the query."
+                                "Please try again or narrow the query."
                             )
 
         # Prepend database hint to response
@@ -1132,12 +1224,17 @@ if prompt := st.chat_input(placeholder_text):
         # Ensure users always receive an explicit fallback message.
         if not response:
             response = (
-                "I could not find directly related variable definitions for that query in the selected database. "
+                "I could not find directly related variable definitions for that query in the selected database scope. "
                 "Try a different keyword or a broader phrasing."
             )
         
-        if selected_db and response:
-            response_with_hint = f"📍 **{selected_db}**\n\n{response}"
+        selected_db_names = st.session_state.get("selected_databases") or []
+        if selected_db_names and response:
+            if len(selected_db_names) <= 3:
+                selected_db_label = ", ".join(selected_db_names)
+            else:
+                selected_db_label = f"{len(selected_db_names)} databases"
+            response_with_hint = f"📍 **{selected_db_label}**\n\n{response}"
         else:
             response_with_hint = response
         
@@ -1150,10 +1247,17 @@ if prompt := st.chat_input(placeholder_text):
         # Add download button if tables were found
         if tables_with_headers:
             excel_file = export_tables_to_excel(tables_with_headers)
+            selected_dbs_for_file = st.session_state.get("selected_databases") or []
+            if not selected_dbs_for_file:
+                db_slug = "no-db"
+            elif len(selected_dbs_for_file) == 1:
+                db_slug = selected_dbs_for_file[0]
+            else:
+                db_slug = f"{len(selected_dbs_for_file)}dbs"
             st.download_button(
                 label=f"📥 Download as Excel ({len(tables_with_headers)} table{'s' if len(tables_with_headers) > 1 else ''})",
                 data=excel_file,
-                file_name=f"NEARchatbot_{st.session_state.selected_database}_{pd.Timestamp.now().strftime('%y%m%d_%H%M%S')}.xlsx",
+                file_name=f"NEARchatbot_{db_slug}_{pd.Timestamp.now().strftime('%y%m%d_%H%M%S')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="download_tables"
             )

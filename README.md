@@ -12,6 +12,8 @@ This chatbot makes it easier for users to look up NEAR metadata by providing an 
 
 Simply visit the link and start asking questions about NEAR metadata. No installation required.
 
+Usage tip: this chatbot works best with one-shot queries. Ask complete standalone questions instead of follow-up questions that depend on previous turns.
+
 ## Local Setup (for developers)
 
 To run the app locally:
@@ -29,6 +31,6 @@ To run the app locally:
 
 ## Configuration
 
-To use the app, set your `GROQ_api_key` in `.env` or Streamlit secrets.
+To use the app, set your `AZURE_api_key` in `.env` or Streamlit secrets.
 
 For implementation details, see [semantic_rag_chatbot.py](semantic_rag_chatbot.py).
