@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="NEAR Metadata Chatbot",
+    page_title="NEAR Metadata Chatbot (Beta)",
     layout="wide",
     initial_sidebar_state="expanded",
     menu_items=None
@@ -90,12 +90,6 @@ except:
 
 # Beta release settings (branch-scoped)
 BETA_RELEASE_LABEL = "v1.4 beta"
-INTERNAL_BETA_ONLY = True
-
-try:
-    INTERNAL_BETA_PASSWORD = st.secrets.get("INTERNAL_BETA_PASSWORD")
-except Exception:
-    INTERNAL_BETA_PASSWORD = os.getenv("INTERNAL_BETA_PASSWORD")
 
 # ── Functions ─────────────────────────────────────────────────────────────────
 
@@ -815,47 +809,10 @@ def get_llm():
     )
 
 
-def enforce_internal_beta_access() -> None:
-    """Optional password gate for internal beta deployments."""
-    if not INTERNAL_BETA_ONLY:
-        return
-
-    if st.session_state.get("beta_auth_ok", False):
-        return
-
-    st.warning("🔒 Internal beta access only")
-
-    if not INTERNAL_BETA_PASSWORD:
-        st.info(
-            "No INTERNAL_BETA_PASSWORD is configured. "
-            "Set it in Streamlit secrets to enforce internal-only access."
-        )
-        return
-
-    entered_password = st.text_input(
-        "Enter internal beta password:",
-        type="password",
-        key="beta_password_input",
-    )
-    unlock_clicked = st.button("Unlock beta", key="beta_unlock_button")
-
-    if unlock_clicked:
-        if entered_password == INTERNAL_BETA_PASSWORD:
-            st.session_state.beta_auth_ok = True
-            st.rerun()
-        else:
-            st.error("Invalid password.")
-
-    st.stop()
-
-
-
-
 # ── Main App ──────────────────────────────────────────────────────────────────
 
-st.title("NEAR Metadata Chatbot")
+st.title("NEAR Metadata Chatbot (Beta)")
 st.caption(f"🧪 Internal Preview • {BETA_RELEASE_LABEL}")
-enforce_internal_beta_access()
 
 # ── Initialize Session State (MUST BE FIRST) ──────────────────────────────────
 # Initialize all session state variables before any code accesses them
@@ -1107,7 +1064,7 @@ if prompt := st.chat_input(placeholder_text):
                 else:
 
                     # Use unified prompt template for metadata queries with table format
-                    prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata. CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly provided in NEAR metadata below.
+                    prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata. CRITICAL: Do NOT invent or hallucinate metadata. Only use information explicitly provided in NEAR metadata below.
 
                 COHORT BACKGROUND:
                 {cohort_background}
@@ -1124,6 +1081,9 @@ if prompt := st.chat_input(placeholder_text):
 
                 ### Question from user:
                 {question}
+
+                 ### Selected Databases Count:
+                 {selected_db_count}
 
                 ### Your Response Instructions:
                      - Treat every question as a single-turn request based only on the current question and provided metadata context
@@ -1149,10 +1109,7 @@ if prompt := st.chat_input(placeholder_text):
                      1. VARIABLE NAMES (Column 1):
                          - EXTRACT EXACTLY the text that appears after "Variable: " in the source data
                          - Copy-paste the exact variable name - do NOT modify, shorten, or translate
-                         - Do NOT use field names like "Description" or "Label" instead
-                         - FORBIDDEN: Do NOT invent variable names not in the source
                          - EXAMPLE RIGHT: Source has "Variable: löpnr". Write "löpnr" exactly
-                         - EXAMPLE WRONG: Inventing "participant_age" when source only has "löpnr"
 
                      2. LABELS (Column 2):
                          - Use the "Label:" field value EXACTLY as written in source data
@@ -1162,7 +1119,6 @@ if prompt := st.chat_input(placeholder_text):
                          - Extract category values EXACTLY as they appear in the source data, typically in a "Categories:" field
                          - FORMAT STRICTLY as: "1=value1, 2=value2, 3=value3" (number=description, comma-separated, NO SEMICOLONS)
                          - If no categories exist, write "N/A"
-                         - Do NOT invent category mappings not in the source
 
                      4. SOURCE (Column 4):
                          - Extract from the header "[Source: filename | Variable: variable_name]" at the start of each block
@@ -1176,7 +1132,7 @@ if prompt := st.chat_input(placeholder_text):
                          - Keep all variables from one database grouped together
 
                      6. DEDUPLICATION:
-                         - Variables with identical Label and Categories within the SAME database are the same variable collected across different time points
+                         - For each database, variables with identical Label and Categories within the SAME database are the same variable collected across different time points
                          - COMBINES these into a single row with all variable names and sources listed
                          - This provides visibility into data collection across waves while avoiding redundancy
 
@@ -1185,8 +1141,20 @@ if prompt := st.chat_input(placeholder_text):
                          - NEVER pad rows with empty cells or partial data
                          - Every variable name must come from the source data
                          - If data is missing from source, DO NOT hallucinate it
-                         - Double-check: Each variable in your table should be traceable to the source context
-                         - If the last row is incomplete, DELETE IT and end the table cleanly
+
+                     8. HARMONIZATION ACROSS DATABASES (ONLY WHEN MULTIPLE DATABASES ARE SELECTED):
+                         - If selected_db_count > 1, ADD a final section titled: `## Harmonization Suggestions Across Databases`
+                         - In this section, include a markdown table with EXACTLY these columns:
+
+                         | Harmonized Concept | Database-Specific Variables | Suggested Harmonized Coding | Notes / Caveats |
+                         |---|---|---|---|
+
+                         - Build each row only from variables that appear in the provided context
+                         - For `Database-Specific Variables`, list variables grouped by database in compact form (example: "Betula: var_a, var_b; SNAC-K: var_x")
+                         - For `Suggested Harmonized Coding`, propose a practical mapping strategy grounded in observed labels/categories
+                         - For `Notes / Caveats`, mention comparability risks such as wording differences, wave differences, missing categories, and instrument differences
+                         - If selected_db_count <= 1, DO NOT include any harmonization section
+                         - If selected_db_count > 1 but evidence is insufficient, still include one row explaining limitations based on available context
                 
                      DETAILED EXAMPLES OF CORRECT FORMAT (organized by database):
                 
@@ -1211,11 +1179,12 @@ if prompt := st.chat_input(placeholder_text):
 
                     PROMPT = PromptTemplate(
                         template=prompt_template, 
-                        input_variables=["cohort_background", "context", "question"]
+                        input_variables=["cohort_background", "context", "question", "selected_db_count"]
                     )
 
                     # Capture session state values before passing to chain (LangChain runs lambdas in different context)
                     current_llm_model = LLM_MODEL_GPT
+                    selected_db_count = len(st.session_state.get("selected_databases") or [])
 
                     rag_chain = (
                         {
@@ -1226,6 +1195,7 @@ if prompt := st.chat_input(placeholder_text):
                                 context_docs,
                             ),
                             "context": lambda _: context,
+                            "selected_db_count": lambda _: selected_db_count,
                             "question": RunnablePassthrough()
                         }
                         | PROMPT
