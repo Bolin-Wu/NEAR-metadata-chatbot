@@ -630,6 +630,59 @@ def deduplicate_documents(documents: list[Document]) -> list[Document]:
     return unique_docs
 
 
+def get_document_database_name(doc: Document) -> str:
+    """Resolve the database name for a retrieved document."""
+    metadata = doc.metadata or {}
+    database = metadata.get("database")
+    if database:
+        return str(database)
+
+    source = metadata.get("source", "")
+    if isinstance(source, str) and ":" in source:
+        return source.split(":", 1)[0]
+
+    return "Unknown"
+
+
+def build_database_grouped_context(documents: list[Document]) -> str:
+    """Render retrieved documents as database-grouped context for the prompt."""
+    if not documents:
+        return ""
+
+    grouped_docs: dict[str, list[Document]] = {}
+    ordered_databases: list[str] = []
+
+    for doc in documents:
+        database = get_document_database_name(doc)
+        if database not in grouped_docs:
+            grouped_docs[database] = []
+            ordered_databases.append(database)
+        grouped_docs[database].append(doc)
+
+    database_sections = []
+    for database in ordered_databases:
+        context_parts = []
+        for doc in grouped_docs[database]:
+            source = (doc.metadata or {}).get("source", "Unknown")
+            variable_name = (doc.metadata or {}).get("variable_name")
+            if isinstance(source, str) and source.endswith(".xml"):
+                source = source[:-4]
+
+            if not str(source).startswith(f"{database}:"):
+                source = f"{database}:{source}"
+
+            if variable_name:
+                context_parts.append(f"[Source: {source} | Variable: {variable_name}]\n{doc.page_content}")
+            else:
+                context_parts.append(f"[Source: {source}]\n{doc.page_content}")
+
+        database_sections.append(
+            f"### Database: {database}\n" + "\n\n---\n\n".join(context_parts)
+        )
+
+    return "\n\n====================\n\n".join(database_sections)
+
+
 def interleave_document_groups(document_groups: list[list[Document]]) -> list[Document]:
     """Interleave docs from multiple groups to balance coverage across databases."""
     if not document_groups:
@@ -768,26 +821,8 @@ def filter_and_organize_context(query, vectorstores, llm_model=None):
             f"| merged_cap: {merged_context_cap} | Model: {llm_model}"
         )
         
-        # Include source information in context
-        context_parts = []
-        for doc in var_defs:
-            source = doc.metadata.get("source", "Unknown")
-            database = doc.metadata.get("database")
-            variable_name = doc.metadata.get("variable_name")
-            # Remove .xml suffix if present
-            if source.endswith(".xml"):
-                source = source[:-4]
-
-            if database:
-                source = f"{database}:{source}"
-
-            if variable_name:
-                context_parts.append(f"[Source: {source} | Variable: {variable_name}]\n{doc.page_content}")
-            else:
-                context_parts.append(f"[Source: {source}]\n{doc.page_content}")
-        
-        context_text = "\n\n---\n\n".join(context_parts)
-        logger.debug(f"Final context: {len(context_parts)} variable definitions included ({len(context_text)} chars)")
+        context_text = build_database_grouped_context(var_defs)
+        logger.debug(f"Final context: {len(var_defs)} variable definitions included ({len(context_text)} chars)")
         return context_text, var_defs
     except Exception as e:
         error_msg = f"Error retrieving context: {e}"
@@ -1002,7 +1037,7 @@ with col2:
     st.caption("- Suggest variables for frailty index.")
 with col3:
     st.caption("- Recommend blood pressure variables for hypertension analysis.")
-    st.caption("- List ADL variables and map each to core ADL, ADL+IADL, and wave-specific sets.")
+    st.caption("- List ADL variables and map each to core ADL, ADL+IADL.")
     st.caption("- Give all bathing, dressing, toileting, transferring variables with source and categories.")
 
 
@@ -1074,16 +1109,21 @@ if prompt := st.chat_input(placeholder_text):
                 Your task is to answer questions about variables and metadata from this cohort.
 
                 ### NEAR metadata (ONLY SOURCE OF TRUTH):
-                Each block below represents one retrieved variable definition.
-                Each block begins with a header in this format:
-                [Source: source_file_name | Variable: variable_name]
+                The metadata below is already organized by database.
+                Each database section begins with a heading in this format:
+                `### Database: DATABASE_NAME`
+                Each variable block under that heading begins with:
+                [Source: database_name:source_file_name | Variable: variable_name]
                 {context}
 
                 ### Question from user:
                 {question}
 
-                 ### Selected Databases Count:
+                ### Number of Selected Databases:
                  {selected_db_count}
+
+                ### Names of Selected Databases:
+                {selected_db_names}
 
                 ### Your Response Instructions:
                      - Treat every question as a single-turn request based only on the current question and provided metadata context
@@ -1099,7 +1139,7 @@ if prompt := st.chat_input(placeholder_text):
                      |---|---|---|---|
                      | variable_name | What it measures in plain English | Category values if applicable | source_file_name |
                 
-                     - List all variables found in each database before moving to the next database
+                     - Ensure full variable coverage in each database through grouped rows (do NOT repeat the same concept in multiple rows)
                      - Group related variables by theme WITHIN each database section
                 
                      ================================================================
@@ -1114,11 +1154,17 @@ if prompt := st.chat_input(placeholder_text):
                      2. LABELS (Column 2):
                          - Use the "Label:" field value EXACTLY as written in source data
                          - Do NOT shorten, paraphrase, or interpret the label
+                         - NEVER synthesize or invent a representative label for grouped rows
+                         - STRICT GROUPING RULE: variables can be grouped only when Label is exactly identical
+                         - If label is not verifiable from provided context, use: "N/A (not verifiable from provided context)"
 
                      3. CATEGORIES (Column 3):
                          - Extract category values EXACTLY as they appear in the source data, typically in a "Categories:" field
                          - FORMAT STRICTLY as: "1=value1, 2=value2, 3=value3" (number=description, comma-separated, NO SEMICOLONS)
                          - If no categories exist, write "N/A"
+                         - NEVER infer, normalize, or invent missing category mappings
+                         - STRICT GROUPING RULE: variables can be grouped only when Categories are exactly identical (or all are exactly "N/A")
+                         - If categories are not verifiable from provided context, use: "N/A (not verifiable from provided context)"
 
                      4. SOURCE (Column 4):
                          - Extract from the header "[Source: filename | Variable: variable_name]" at the start of each block
@@ -1126,65 +1172,101 @@ if prompt := st.chat_input(placeholder_text):
                          - Use the exact source filename provided
 
                      5. DATABASE ORGANIZATION:
-                         - Extract the database name from the Source field (appears before the colon in "[Source: DATABASE:filename | ...]")
-                         - If database name is not explicitly prefixed, extract from source filename context
-                         - Create separate `## Database Name` headers for each database
-                         - Keep all variables from one database grouped together
+                         - Create separate `## Database Name` headers for each database present in the input context
+                         - Use ONLY the variable blocks that appear under the matching `### Database: DATABASE_NAME` input section for that database's output table
+                         - NEVER place a variable into a different database's table than the input section where it appears
+                         - The Source field still includes the database prefix as a secondary check: "[Source: DATABASE:filename | ...]"
 
                      6. DEDUPLICATION:
-                         - For each database, variables with identical Label and Categories within the SAME database are the same variable collected across different time points
-                         - COMBINES these into a single row with all variable names and sources listed
-                         - This provides visibility into data collection across waves while avoiding redundancy
+                         - Within the SAME database, merge variables into one row ONLY if BOTH Label and Categories are exactly identical
+                         - If either Label or Categories differs, keep them as separate rows (even if conceptually similar)
+                         - In merged rows, list all variable names and sources that meet the exact-match rule
+
+                     6A. NO FUZZY MATCHING FOR DEDUP:
+                         - Do NOT normalize, relax, or approximate Label/Categories when deciding grouping
+                         - Minor wording, spacing, punctuation, or ordering differences mean NOT equal for grouping
+
+                     6B. REQUIRED TWO-PASS WORKFLOW (INTERNAL REASONING, THEN OUTPUT):
+                         - PASS 1 (per database): build groups using exact pair key = (Label text, Categories text)
+                         - PASS 2 (per database): render the markdown table from concept groups only
+                         - HARD CHECK before finalizing each database table: merge rows only when exact pair key is identical
+                         - HARD CHECK for completeness: every variable used in PASS 1 must appear in exactly one final grouped row
 
                      7. VALIDATION (CRITICAL - MUST FOLLOW):
                          - EVERY row must have ALL 4 columns completely filled (NO EMPTY CELLS)
                          - NEVER pad rows with empty cells or partial data
                          - Every variable name must come from the source data
                          - If data is missing from source, DO NOT hallucinate it
+                         - For each database, DO NOT output duplicate rows with the same exact (Label, Categories) pair
+                         - If a Label or Categories value cannot be quoted exactly from provided context, use the explicit fallback strings above instead of guessing
 
                      8. HARMONIZATION ACROSS DATABASES (ONLY WHEN MULTIPLE DATABASES ARE SELECTED):
-                         - If selected_db_count > 1, ADD a final section titled: `## Harmonization Suggestions Across Databases`
+                         - If the number of selected databases is greater than 1, ADD a final section titled: `## Harmonization Suggestions Across Databases`
                          - In this section, include a markdown table with EXACTLY these columns:
 
                          | Harmonized Concept | Database-Specific Variables | Suggested Harmonized Coding | Notes / Caveats |
                          |---|---|---|---|
 
+                         - STRICT SCOPE: This section is ONLY for cross-database harmonization, never within-database harmonization
                          - Build each row only from variables that appear in the provided context
-                         - For `Database-Specific Variables`, list variables grouped by database in compact form (example: "Betula: var_a, var_b; SNAC-K: var_x")
+                         - Only include a harmonization row if the harmonized concept has at least one usable variable from EVERY selected database listed under `Names of Selected Databases`
+                         - Exclude concepts that are missing in any selected database
+                         - For `Database-Specific Variables`, list database groups in the EXACT same order as the databases listed under `Names of Selected Databases`
+                         - Every harmonization row MUST explicitly mention ALL selected databases in `Database-Specific Variables`; if any selected database is missing in that row, DROP the row
+                         - Use this strict format for `Database-Specific Variables`: "DB1: var_a, var_b; DB2: var_x; DB3: var_m, var_n"
                          - For `Suggested Harmonized Coding`, propose a practical mapping strategy grounded in observed labels/categories
                          - For `Notes / Caveats`, mention comparability risks such as wording differences, wave differences, missing categories, and instrument differences
-                         - If selected_db_count <= 1, DO NOT include any harmonization section
-                         - If selected_db_count > 1 but evidence is insufficient, still include one row explaining limitations based on available context
+                         - If the number of selected databases is 1 or less, DO NOT include any harmonization section
+                         - If the number of selected databases is greater than 1 but no concept is available across ALL selected databases, include the section with one row stating: "No robust cross-database harmonization candidates found across all selected databases."
                 
-                     DETAILED EXAMPLES OF CORRECT FORMAT (organized by database):
-                
+                     COMBINED EXAMPLE OF CORRECT FORMAT:
+
+                     Use the same structure whether one or multiple databases are selected: one section per database, and within each database merge rows ONLY when Label and Categories are exactly identical.
+
                      ## Betula
-                     "In Betula, several variables measure basic demographics and cognition."
-                
+                     In Betula, several variables measure demographics and cognition.
+
                      | Variable Name | Label | Categories | Source |
                      |---|---|---|---|
                      | ID | Participant identifier | N/A | Betula_Demographics |
                      | age | Age in years | N/A | Betula_Demographics |
                      | memory_score | Score on memory test | N/A | Betula_Cognition |
-                
+
                      ## SNAC-K
-                     "In SNAC-K, demographics are recorded with biological sex information."
-                
+                     In SNAC-K, demographics are recorded with biological sex information.
+
                      | Variable Name | Label | Categories | Source |
                      |---|---|---|---|
                      | löpnr | Unique participant identifier number | N/A | SNAC_K_Baseline |
                      | kön | Participant's biological sex | 1=man, 2=woman | SNAC_K_Baseline |
 
+                     ## GAS_SNAC_S
+                     Within one database, merge only exact Label+Categories matches.
+
+                     | Variable Name | Label | Categories | Source |
+                     |---|---|---|---|
+                     | FAS2_D40, FAS3_D40, FAS4_D40 | Difficulty dressing | 0=no, 1=yes | GAS_SNAC_S_Wave2, GAS_SNAC_S_Wave3, GAS_SNAC_S_Wave4 |
+                     | BAS1_D40, BAS2_D40, BAS3_D40 | Difficulty dressing (last 30 days) | 0=no, 1=yes | GAS_SNAC_S_Wave2, GAS_SNAC_S_Wave3, GAS_SNAC_S_Wave4 |
+
+                     ## SNAC-B
+                     Across another database, the same rule applies: exact matches may merge; different categories must stay separate.
+
+                     | Variable Name | Label | Categories | Source |
+                     |---|---|---|---|
+                     | FAS1_D40, FAS2_D40, FAS3_D40 | Difficulty dressing | 0=no, 1=yes | SNAC_B_Baseline, SNAC_B_FollowUp |
+                     | BAS1_D40, BAS2_D40, BAS3_D40 | Difficulty dressing | 0=no, 1=some difficulty, 2=unable | SNAC_B_Baseline, SNAC_B_FollowUp |
+
                 Answer:"""
 
                     PROMPT = PromptTemplate(
                         template=prompt_template, 
-                        input_variables=["cohort_background", "context", "question", "selected_db_count"]
+                        input_variables=["cohort_background", "context", "question", "selected_db_count", "selected_db_names"]
                     )
 
                     # Capture session state values before passing to chain (LangChain runs lambdas in different context)
                     current_llm_model = LLM_MODEL_GPT
                     selected_db_count = len(st.session_state.get("selected_databases") or [])
+                    selected_db_names = ", ".join(st.session_state.get("selected_databases") or [])
 
                     rag_chain = (
                         {
@@ -1196,6 +1278,7 @@ if prompt := st.chat_input(placeholder_text):
                             ),
                             "context": lambda _: context,
                             "selected_db_count": lambda _: selected_db_count,
+                            "selected_db_names": lambda _: selected_db_names,
                             "question": RunnablePassthrough()
                         }
                         | PROMPT
@@ -1231,6 +1314,8 @@ if prompt := st.chat_input(placeholder_text):
         # Prepend database hint to response
         selected_db = st.session_state.get("selected_database")
         
+        selected_db_names = st.session_state.get("selected_databases") or []
+
         # Trim whitespace while preserving the original LLM response text.
         if response:
             response = response.strip()
@@ -1243,12 +1328,8 @@ if prompt := st.chat_input(placeholder_text):
                 "Try a different keyword or a broader phrasing."
             )
         
-        selected_db_names = st.session_state.get("selected_databases") or []
         if selected_db_names and response:
-            if len(selected_db_names) <= 3:
-                selected_db_label = ", ".join(selected_db_names)
-            else:
-                selected_db_label = f"{len(selected_db_names)} databases"
+            selected_db_label = ", ".join(selected_db_names)
             response_with_hint = f"📍 **{selected_db_label}**\n\n{response}"
         else:
             response_with_hint = response
