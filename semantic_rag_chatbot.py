@@ -66,12 +66,13 @@ AZURE_FOUNDRY_BASE_URL = "https://llm-chatbot-api.cognitiveservices.azure.com/op
 # LLM Hyperparameters
 LLM_TEMPERATURE = 0.3           # Balanced: accurate answers with flexibility for general knowledge (0.0=deterministic, 1.0=creative)
 
+# Rate Limiting (per browser session — protects Azure API credit from abuse)
+RATE_LIMIT_MAX_GPT_QUERIES = 10      # Azure GPT calls allowed per session
+
 # Retrieval Parameters
 RETRIEVAL_K_BACKGROUND = 5      # Top-5 docs for cohort background context
 RETRIEVAL_K_CONTEXT = 60        # Top-60 docs for variable definitions (increased for better category capture)
 RETRIEVAL_K_CONTEXT_GROQ = 30   # Reduced for Groq free tier to stay within 6000 TPM token limit
-RETRIEVAL_K_CONTEXT_BROAD = 80  # Higher recall for broad recommendation queries
-RETRIEVAL_K_CONTEXT_BROAD_GROQ = 40
 EXACT_MATCH_LIMIT = 3          # Exact variable-name hits to merge ahead of semantic results
 BACKGROUND_ENRICH_FALLBACK_DOCS = 3  # Fallback docs used when no exact variable match is found
 BACKGROUND_ENRICH_MAX_DOCS = 3       # Max docs used to extract enrichment terms
@@ -480,6 +481,10 @@ if "latest_tables_with_headers" not in st.session_state:
 if "selected_llm_model" not in st.session_state:
     st.session_state.selected_llm_model = LLM_MODEL_GROQ
 
+# Initialize Azure GPT rate-limit counter (resets when the browser session resets)
+if "gpt_query_count" not in st.session_state:
+    st.session_state.gpt_query_count = 0
+
 def get_complete_background(vectorstore):
     """Retrieve all database description chunks via semantic search.
     
@@ -570,27 +575,6 @@ def get_relevant_background(query, vectorstore, context_docs=None):
         logger.error(f"Error retrieving background: {e}")
         return get_complete_background(vectorstore)
 
-
-def is_broad_variable_query(query: str) -> bool:
-    """Heuristic detector for broad recommendation-style variable queries."""
-    if not query:
-        return False
-
-    query_lower = query.lower()
-    broad_markers = [
-        "recommend",
-        "suggest",
-        "construct",
-        "build",
-        "scale",
-        "score",
-        "index",
-        "all variables",
-        "overview",
-        "list variables",
-    ]
-
-    return any(marker in query_lower for marker in broad_markers)
 
 
 def extract_variable_name_candidates(query: str) -> list[str]:
@@ -718,15 +702,8 @@ def filter_and_organize_context(query, vectorstore, llm_model=None):
         return "", []
     
     try:
-        # Adjust retrieval depth based on query intent and LLM model.
-        broad_query = is_broad_variable_query(query)
-        if llm_model == LLM_MODEL_GROQ:
-            k_context = RETRIEVAL_K_CONTEXT_BROAD_GROQ if broad_query else RETRIEVAL_K_CONTEXT_GROQ
-        else:
-            k_context = RETRIEVAL_K_CONTEXT_BROAD if broad_query else RETRIEVAL_K_CONTEXT
-        
-        # Increase retrieval depth to capture more complete category information
-        # especially for broader queries like "recommend variables for CIRS"
+        # Adjust retrieval depth based on LLM model.
+        k_context = RETRIEVAL_K_CONTEXT_GROQ if llm_model == LLM_MODEL_GROQ else RETRIEVAL_K_CONTEXT
         retriever = vectorstore.as_retriever(
             search_kwargs={
                 "k": k_context,
@@ -739,7 +716,7 @@ def filter_and_organize_context(query, vectorstore, llm_model=None):
         
         # Debug logging: show how many documents were retrieved
         logger.debug(
-            f"Query: '{query}' | BroadQuery: {broad_query} | k_context: {k_context} "
+            f"Query: '{query}' | k_context: {k_context} "
             f"| Semantic docs: {len(docs)} | Exact docs: {len(exact_docs)} "
             f"| Final docs: {len(var_defs)} | Model: {llm_model}"
         )
@@ -899,6 +876,18 @@ with st.sidebar:
     
     st.markdown("---")
     
+    # Session usage display (Azure GPT only)
+    st.subheader("Session Usage")
+    gpt_used = st.session_state.gpt_query_count
+    gpt_left = max(0, RATE_LIMIT_MAX_GPT_QUERIES - gpt_used)
+    st.caption(f"Azure GPT queries: {gpt_used} / {RATE_LIMIT_MAX_GPT_QUERIES} ({gpt_left} remaining)")
+    if gpt_left == 0:
+        st.warning(f"Azure GPT limit reached. Switch to {LLM_MODEL_GROQ} or start a new session.")
+    elif gpt_left <= 3:
+        st.caption(f"⚠️ Only {gpt_left} Azure GPT queries left this session.")
+
+    st.markdown("---")
+    
     # Contact & Support
     st.subheader("Contact & Support")
     st.markdown("""
@@ -964,32 +953,50 @@ if prompt := st.chat_input(placeholder_text):
             response = ""
         else:
             with st.spinner("Thinking..."):
-                # Get the selected LLM model
-                llm = get_llm(st.session_state.selected_llm_model)
-                
-                # Display which model is being used
-                st.caption(f"🔧 Using: {st.session_state.selected_llm_model}")
-                
-                # Get context (already filtered to selected database via collection)
-                # Returns both context text and document list
-                context, context_docs = filter_and_organize_context(prompt, vectorstore, st.session_state.selected_llm_model)
+                # ── Rate-limit check (Azure GPT only) ────────────────────────
+                chosen_model = st.session_state.selected_llm_model
+                gpt_limit_hit = (
+                    chosen_model == LLM_MODEL_GPT
+                    and st.session_state.gpt_query_count >= RATE_LIMIT_MAX_GPT_QUERIES
+                )
 
-                # Avoid blank assistant output when retrieval returns no variable chunks.
-                if not context.strip():
-                    response = (
-                        "I could not find matching variable definitions for that query in the selected database. "
-                        "Try a more specific term (for example: systolic, diastolic, hypertension, blood pressure)."
+                if gpt_limit_hit:
+                    st.warning(
+                        f"⚠️ Azure GPT limit reached for this session ({RATE_LIMIT_MAX_GPT_QUERIES} queries). "
+                        f"Switch to **{LLM_MODEL_GROQ}** or start a new session."
                     )
-                    logger.warning(
-                        "Empty retrieval context for query '%s' in database '%s' using model '%s'",
-                        prompt,
-                        st.session_state.get("selected_database"),
-                        st.session_state.selected_llm_model,
-                    )
+                    response = ""
                 else:
+                    # Increment counter before the call so a crashed call still counts
+                    if chosen_model == LLM_MODEL_GPT:
+                        st.session_state.gpt_query_count += 1
 
-                    # Use unified prompt template for metadata queries with table format
-                    prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata. CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly provided in NEAR metadata below.
+                    # Get the selected LLM model
+                    llm = get_llm(st.session_state.selected_llm_model)
+                    
+                    # Display which model is being used
+                    st.caption(f"🔧 Using: {st.session_state.selected_llm_model}")
+                    
+                    # Get context (already filtered to selected database via collection)
+                    # Returns both context text and document list
+                    context, context_docs = filter_and_organize_context(prompt, vectorstore, st.session_state.selected_llm_model)
+
+                    # Avoid blank assistant output when retrieval returns no variable chunks.
+                    if not context.strip():
+                        response = (
+                            "I could not find matching variable definitions for that query in the selected database. "
+                            "Try a more specific term (for example: systolic, diastolic, hypertension, blood pressure)."
+                        )
+                        logger.warning(
+                            "Empty retrieval context for query '%s' in database '%s' using model '%s'",
+                            prompt,
+                            st.session_state.get("selected_database"),
+                            st.session_state.selected_llm_model,
+                        )
+                    else:
+
+                        # Use unified prompt template for metadata queries with table format
+                        prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata. CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly provided in NEAR metadata below.
 
                 COHORT BACKGROUND:
                 {cohort_background}
@@ -1079,47 +1086,47 @@ if prompt := st.chat_input(placeholder_text):
 
                 Answer:"""
 
-                    PROMPT = PromptTemplate(
-                        template=prompt_template, 
-                        input_variables=["cohort_background", "context", "question"]
-                    )
+                        PROMPT = PromptTemplate(
+                            template=prompt_template, 
+                            input_variables=["cohort_background", "context", "question"]
+                        )
 
-                    rag_chain = (
-                        {
-                            "cohort_background": lambda user_query: get_relevant_background(user_query, vectorstore, context_docs),
-                            "context": lambda _: context,
-                            "question": RunnablePassthrough()
-                        }
-                        | PROMPT
-                        | llm
-                        | StrOutputParser()
-                    )
+                        rag_chain = (
+                            {
+                                "cohort_background": lambda user_query: get_relevant_background(user_query, vectorstore, context_docs),
+                                "context": lambda _: context,
+                                "question": RunnablePassthrough()
+                            }
+                            | PROMPT
+                            | llm
+                            | StrOutputParser()
+                        )
 
-                    try:
-                        logger.debug(f"Starting LLM invocation with query: {prompt[:100]}...")
-                        logger.debug(f"Context length: {len(context)} chars, {len(context_docs)} docs")
-                        logger.debug(f"Using model: {st.session_state.selected_llm_model}")
-                        response = rag_chain.invoke(prompt)
-                        logger.debug(f"LLM Response received (first 500 chars): {response[:500]}")
-                    except Exception as e:
-                        error_str = str(e)
-                        logger.error(f"LLM Error: {error_str}")
-                        logger.exception("Full exception traceback:")
-                        
-                        # Check for token limit exceeded error
-                        current_model = st.session_state.selected_llm_model
-                        if "rate_limit_exceeded" in error_str and "tokens" in error_str.lower():
-                            st.error(f"⚠️ Request too large for {current_model}. Try asking about a smaller subset of variables.")
-                            response = ""
-                        elif "rate_limit" in str(e).lower() or "429" in str(e):
-                            st.error(f"⚠️ Rate limit reached for {current_model}. Please try again in a few moments.")
-                            response = ""
-                        else:
-                            st.error(f"Error: {str(e)}")
-                            response = (
-                                "I ran into an issue while generating the answer. "
-                                "Please try again, switch model, or narrow the query."
-                            )
+                        try:
+                            logger.debug(f"Starting LLM invocation with query: {prompt[:100]}...")
+                            logger.debug(f"Context length: {len(context)} chars, {len(context_docs)} docs")
+                            logger.debug(f"Using model: {st.session_state.selected_llm_model}")
+                            response = rag_chain.invoke(prompt)
+                            logger.debug(f"LLM Response received (first 500 chars): {response[:500]}")
+                        except Exception as e:
+                            error_str = str(e)
+                            logger.error(f"LLM Error: {error_str}")
+                            logger.exception("Full exception traceback:")
+                            
+                            # Check for token limit exceeded error
+                            current_model = st.session_state.selected_llm_model
+                            if "rate_limit_exceeded" in error_str and "tokens" in error_str.lower():
+                                st.error(f"⚠️ Request too large for {current_model}. Try asking about a smaller subset of variables.")
+                                response = ""
+                            elif "rate_limit" in str(e).lower() or "429" in str(e):
+                                st.error(f"⚠️ Rate limit reached for {current_model}. Please try again in a few moments.")
+                                response = ""
+                            else:
+                                st.error(f"Error: {str(e)}")
+                                response = (
+                                    "I ran into an issue while generating the answer. "
+                                    "Please try again, switch model, or narrow the query."
+                                )
 
         # Prepend database hint to response
         selected_db = st.session_state.get("selected_database")
@@ -1159,6 +1166,7 @@ if prompt := st.chat_input(placeholder_text):
             )
 
     st.session_state.messages.append({"role": "assistant", "content": response_with_hint})
+    st.rerun()
 
 if st.button("Clear Chat"):
     st.session_state.messages = []
