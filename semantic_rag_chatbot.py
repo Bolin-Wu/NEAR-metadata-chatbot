@@ -56,12 +56,15 @@ KNOWN_DATABASES = [
 
 # LLM Model Names (for consistency across the app)
 LLM_MODEL_GROQ = "Llama 3.1 8B (Groq)"
-LLM_MODEL_GPT = "GPT-5.4 Mini (Azure Foundry)"
+LLM_MODEL_GPT = "GPT-5.4 Mini (Azure)"
+LLM_MODEL_XAI_GROK = "Grok 4.1 Fast Reasoning (xAI)"
 
 # LLM Model IDs (technical identifiers for API calls)
 GROQ_MODEL_ID = "llama-3.1-8b-instant"
 GPT_MODEL_ID = "gpt-5.4-mini"
+XAI_GROK_MODEL_ID = "grok-4-1-fast-reasoning"
 AZURE_FOUNDRY_BASE_URL = "https://llm-chatbot-api.cognitiveservices.azure.com/openai/v1/"
+XAI_BASE_URL = "https://api.x.ai/v1/"
 
 # LLM Hyperparameters
 LLM_TEMPERATURE = 0.3           # Balanced: accurate answers with flexibility for general knowledge (0.0=deterministic, 1.0=creative)
@@ -87,6 +90,11 @@ try:
     AZURE_api_key = st.secrets["AZURE_api_key"]
 except (FileNotFoundError, KeyError, AttributeError):
     AZURE_api_key = os.getenv("AZURE_api_key")
+
+try:
+    XAI_api_key = st.secrets["XAI_api_key"]
+except (FileNotFoundError, KeyError, AttributeError):
+    XAI_api_key = os.getenv("XAI_api_key")
     
 
 # Cloud storage URL for production vector database (optional)
@@ -764,6 +772,16 @@ def get_llm(model_name: str):
             base_url=AZURE_FOUNDRY_BASE_URL,
             temperature=LLM_TEMPERATURE,
         )
+    elif model_name == LLM_MODEL_XAI_GROK:
+        if not XAI_api_key:
+            st.error("❌ XAI_api_key not configured")
+            st.stop()
+        return ChatOpenAI(
+            api_key=XAI_api_key,
+            model=XAI_GROK_MODEL_ID,
+            base_url=XAI_BASE_URL,
+            temperature=LLM_TEMPERATURE,
+        )
     else:  # Default to Groq Llama 3.1 8B
         if not GROQ_API_KEY:
             st.error("❌ GROQ_api_key not configured")
@@ -860,7 +878,7 @@ with st.sidebar:
     
     # LLM Model Selection
     st.subheader("Select LLM Model")
-    available_models = [LLM_MODEL_GROQ, LLM_MODEL_GPT]
+    available_models = [LLM_MODEL_GROQ, LLM_MODEL_GPT, LLM_MODEL_XAI_GROK]
     selected_model = st.radio(
         "Choose LLM model:",
         options=available_models,
@@ -870,7 +888,9 @@ with st.sidebar:
     st.session_state.selected_llm_model = selected_model
     
     if selected_model == LLM_MODEL_GPT:
-        st.caption("🧠 Azure Foundry GPT-5.4 Mini for stronger reasoning on metadata questions")
+        st.caption("🧠 GPT-5.4 Mini for stronger reasoning on metadata questions")
+    elif selected_model == LLM_MODEL_XAI_GROK:
+        st.caption("🚀 Fast reasoning with xAI Grok 4.1")
     else:
         st.caption("⚡ Faster responses with slightly smaller context window (may miss some category info)")
     
