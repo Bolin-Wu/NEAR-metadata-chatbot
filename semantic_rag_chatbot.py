@@ -1186,7 +1186,6 @@ if prompt := st.chat_input(placeholder_text):
             )
 
     st.session_state.messages.append({"role": "assistant", "content": response_with_hint})
-    st.rerun()
 
 if st.button("Clear Chat"):
     st.session_state.messages = []
