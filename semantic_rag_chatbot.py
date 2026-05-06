@@ -65,7 +65,7 @@ LLM_TEMPERATURE = 0.3           # Balanced: accurate answers with flexibility fo
 
 # Retrieval Parameters
 RETRIEVAL_K_BACKGROUND = 5      # Top-5 docs for cohort background context
-RETRIEVAL_K_CONTEXT = 60        # Top-60 docs for variable definitions (increased for better category capture)
+RETRIEVAL_K_CONTEXT = 100        # Top-100 docs for variable definitions (increased for better category capture)
 EXACT_MATCH_LIMIT = 3          # Exact variable-name hits to merge ahead of semantic results
 BACKGROUND_ENRICH_FALLBACK_DOCS = 3  # Fallback docs used when no exact variable match is found
 BACKGROUND_ENRICH_MAX_DOCS = 3       # Max docs used to extract enrichment terms
@@ -86,12 +86,19 @@ except (FileNotFoundError, KeyError, AttributeError):
     AZURE_openai_endpoint = os.getenv("AZURE_openai_endpoint")
     
 
-# Cloud storage URL for production vector database (optional)
-# Use HuggingFace Hub: huggingface_hub.download() with repo_id
+# Cloud storage repo for vector database artifacts.
+# Prefer the Azure-specific repo key and fall back to the legacy key.
+try:
+    HUGGINGFACE_AZURE_REPO = st.secrets.get("HUGGINGFACE_AZURE_REPO")
+except Exception:
+    HUGGINGFACE_AZURE_REPO = os.getenv("HUGGINGFACE_AZURE_REPO")
+
 try:
     HUGGINGFACE_REPO_ID = st.secrets.get("HUGGINGFACE_REPO_ID")
-except:
+except Exception:
     HUGGINGFACE_REPO_ID = os.getenv("HUGGINGFACE_REPO_ID")
+
+HUGGINGFACE_DB_REPO = HUGGINGFACE_AZURE_REPO or HUGGINGFACE_REPO_ID
 
 # Beta release settings (branch-scoped)
 BETA_RELEASE_LABEL = "v1.4 beta"
@@ -315,8 +322,10 @@ def initialize_production_db():
     # ─ Validate required configuration ─────────────────────────────────────────
     # Stop immediately if HuggingFace repository ID is not configured
     # This is a required secret in Streamlit Cloud
-    if not HUGGINGFACE_REPO_ID:
-        st.error("❌ HUGGINGFACE_REPO_ID not configured. Please contact the maintainer.")
+    if not HUGGINGFACE_DB_REPO:
+        st.error(
+            "❌ HuggingFace DB repo not configured. Set HUGGINGFACE_AZURE_REPO or HUGGINGFACE_REPO_ID."
+        )
         st.stop()
     
     db_folder_name = os.path.basename(os.path.normpath(CHROMA_DB))
@@ -335,12 +344,12 @@ def initialize_production_db():
         # File is cached in ~/.cache/huggingface to avoid re-downloading
         try:
             zip_path = hf_hub_download(
-                repo_id=HUGGINGFACE_REPO_ID,
+                repo_id=HUGGINGFACE_DB_REPO,
                 filename=db_archive_name,
                 repo_type="dataset",
                 cache_dir=Path.home() / ".cache" / "huggingface"
             )
-            logger.info(f"Downloaded database from HuggingFace: {HUGGINGFACE_REPO_ID}")
+            logger.info(f"Downloaded database from HuggingFace: {HUGGINGFACE_DB_REPO}")
         except Exception as e:
             # Handle download errors (network issues, missing file, auth errors, etc.)
             error_msg = f"Failed to download from HuggingFace: {e}"
@@ -889,9 +898,9 @@ if "available_databases_loaded" not in st.session_state:
     st.session_state.available_databases_loaded = False
     st.session_state.available_databases = []
 
-# Verify HUGGINGFACE_REPO_ID is available before initializing database
-if not HUGGINGFACE_REPO_ID:
-    st.error("❌ HUGGINGFACE_REPO_ID not configured in Streamlit secrets.")
+# Verify HuggingFace repo config is available before initializing database
+if not HUGGINGFACE_DB_REPO:
+    st.error("❌ HuggingFace DB repo not configured. Set HUGGINGFACE_AZURE_REPO or HUGGINGFACE_REPO_ID.")
     st.stop()
 
 # Initialize production database from cloud if needed (MUST BE FIRST!)
@@ -940,13 +949,6 @@ with st.sidebar:
         col1, col2, col3 = st.columns([0.5, 2.5, 0.5])
         with col2:
             st.image(str(logo_path), width='stretch')
-    st.markdown("---")
-
-    # Active vector DB indicator
-    active_db_name = os.path.basename(os.path.normpath(CHROMA_DB))
-    st.subheader("Vector Store")
-    st.caption(f"Active Chroma DB: {active_db_name}")
-    st.caption(f"Path: {os.path.abspath(CHROMA_DB)}")
     st.markdown("---")
     
     # Database selection
@@ -1034,6 +1036,14 @@ with st.sidebar:
     **E-mail:** [📧 bolin.wu@ki.se](mailto:bolin.wu@ki.se)
     """)
     
+    st.markdown("---")
+    
+    # Active vector DB indicator
+    active_db_name = os.path.basename(os.path.normpath(CHROMA_DB))
+    active_hf_repo = HUGGINGFACE_DB_REPO or "Not configured"
+    st.subheader("Vector Store")
+    st.caption(f"Active Chroma DB: {active_db_name}")
+    st.caption(f"Hugging Face Repo: {active_hf_repo}")
     st.markdown("---")
     
     # Changelog

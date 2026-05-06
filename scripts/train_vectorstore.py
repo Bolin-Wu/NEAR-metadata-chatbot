@@ -19,7 +19,7 @@ EMBEDDING_MODEL = "text-embedding-3-small"
 CHROMA_DB = "./chroma_azure_db"
 DATA_ROOT = "./data"
 AZURE_OPENAI_API_VERSION = "2024-02-01"
-HUGGINGFACE_TARGET_REPO = st.secrets["HUGGINGFACE_TARGET_REPO"]
+HUGGINGFACE_AZURE_REPO = st.secrets["HUGGINGFACE_AZURE_REPO"]
 
 # Chunk configuration
 # XML now uses one variable per document via parse_xml_to_documents()
@@ -281,7 +281,7 @@ if __name__ == "__main__":
             f"   python -c \"import shutil; shutil.make_archive('{archive_name}', 'zip', '.', '{archive_name}')\""
         )
         print(
-            f"   hf upload {HUGGINGFACE_TARGET_REPO} ./{archive_name}.zip {archive_name}.zip --repo-type=dataset --commit-message 'xxxxx'"
+            f"   hf upload {HUGGINGFACE_AZURE_REPO} ./{archive_name}.zip {archive_name}.zip --repo-type=dataset --commit-message 'xxxxx'"
         )
             
     except Exception as e:
