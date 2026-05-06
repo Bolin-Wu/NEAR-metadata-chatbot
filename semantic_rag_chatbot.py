@@ -731,28 +731,15 @@ def interleave_document_groups(document_groups: list[list[Document]]) -> list[Do
     return merged
 
 
-def get_retrieval_budget(llm_model: str | None) -> dict:
-    """Return model-aware retrieval caps for multi-database querying."""
-    max_selected_databases = TUNE_MAX_SELECTED_DATABASES
-    merged_context_cap = TUNE_MERGED_CONTEXT_CAP
-
-    return {
-        "max_selected_databases": max_selected_databases,
-        "merged_context_cap": merged_context_cap,
-    }
-
-
-def safe_query_vectorstores(vectorstores: list, llm_model: str | None) -> list:
+def safe_query_vectorstores(vectorstores: list) -> list:
     """Cap selected vectorstores based on model budget to avoid token blowups."""
     if not vectorstores:
         return []
 
-    budget = get_retrieval_budget(llm_model)
-    max_selected_databases = budget["max_selected_databases"]
-    if len(vectorstores) <= max_selected_databases:
+    if len(vectorstores) <= TUNE_MAX_SELECTED_DATABASES:
         return vectorstores
 
-    return vectorstores[:max_selected_databases]
+    return vectorstores[:TUNE_MAX_SELECTED_DATABASES]
 
 
 def exact_variable_name_lookup(query: str, vectorstore) -> list[Document]:
@@ -815,9 +802,8 @@ def filter_and_organize_context(query, vectorstores, llm_model=None):
     
     try:
         # Use model-aware retrieval caps for stable multi-database behavior.
-        budget = get_retrieval_budget(llm_model)
         original_count = len(vectorstores)
-        vectorstores = safe_query_vectorstores(vectorstores, llm_model)
+        vectorstores = safe_query_vectorstores(vectorstores)
         if len(vectorstores) < original_count:
             st.toast(
                 f"⚠️ Querying {len(vectorstores)} of {original_count} selected databases "
@@ -825,10 +811,7 @@ def filter_and_organize_context(query, vectorstores, llm_model=None):
                 icon="⚠️",
             )
 
-        k_context_base = TUNE_K_CONTEXT
-
-        per_db_k = max(4, int(k_context_base / max(1, len(vectorstores))))
-        merged_context_cap = budget["merged_context_cap"]
+        per_db_k = max(4, int(TUNE_K_CONTEXT / max(1, len(vectorstores))))
         
         semantic_groups = []
         exact_docs = []
@@ -844,14 +827,14 @@ def filter_and_organize_context(query, vectorstores, llm_model=None):
             exact_docs.extend(exact_variable_name_lookup(query, vectorstore))
 
         docs = interleave_document_groups(semantic_groups)
-        var_defs = deduplicate_documents(exact_docs + docs)[:merged_context_cap]
+        var_defs = deduplicate_documents(exact_docs + docs)[:TUNE_MERGED_CONTEXT_CAP]
         
         # Debug logging: show how many documents were retrieved
         logger.debug(
             f"Query: '{query}' | per_db_k: {per_db_k} "
             f"| DBs: {len(vectorstores)} | Semantic docs: {len(docs)} "
             f"| Exact docs: {len(exact_docs)} | Final docs: {len(var_defs)} "
-            f"| merged_cap: {merged_context_cap} | Model: {llm_model}"
+            f"| merged_cap: {TUNE_MERGED_CONTEXT_CAP} | Model: {llm_model}"
         )
         
         context_text = build_database_grouped_context(var_defs)
@@ -964,7 +947,6 @@ with st.sidebar:
             default_databases = sorted_databases[:1]
 
         llm_model_for_caps = st.session_state.get("selected_llm_model", LLM_MODEL_GPT)
-        max_selected = get_retrieval_budget(llm_model_for_caps)["max_selected_databases"]
 
         current_selected_databases = []
         for db_name in sorted_databases:
@@ -973,8 +955,8 @@ with st.sidebar:
                 current_selected_databases.append(db_name)
 
         trimmed_database_selection = False
-        if len(current_selected_databases) > max_selected:
-            for db_name in current_selected_databases[max_selected:]:
+        if len(current_selected_databases) > TUNE_MAX_SELECTED_DATABASES:
+            for db_name in current_selected_databases[TUNE_MAX_SELECTED_DATABASES:]:
                 st.session_state[f"database_toggle_{db_name}"] = False
             trimmed_database_selection = True
 
@@ -993,7 +975,7 @@ with st.sidebar:
 
         if trimmed_database_selection:
             st.caption(
-                f"You can select up to {max_selected} databases with {llm_model_for_caps}. "
+                f"You can select up to {TUNE_MAX_SELECTED_DATABASES} databases with {llm_model_for_caps}. "
                 f"Extra selections were turned off to stay within context limits."
             )
 
@@ -1006,11 +988,11 @@ with st.sidebar:
                 continue
             loaded_databases.append(db_name)
             selected_vectorstores.append(vectorstore)
-        if len(loaded_databases) > max_selected:
-            loaded_databases = loaded_databases[:max_selected]
-            selected_vectorstores = selected_vectorstores[:max_selected]
+        if len(loaded_databases) > TUNE_MAX_SELECTED_DATABASES:
+            loaded_databases = loaded_databases[:TUNE_MAX_SELECTED_DATABASES]
+            selected_vectorstores = selected_vectorstores[:TUNE_MAX_SELECTED_DATABASES]
             st.caption(
-                f"Using first {max_selected} selected databases for {llm_model_for_caps} to stay within context limits."
+                f"Using first {TUNE_MAX_SELECTED_DATABASES} selected databases for {llm_model_for_caps} to stay within context limits."
             )
 
         st.session_state.selected_databases = loaded_databases
@@ -1237,24 +1219,24 @@ if prompt := st.chat_input(placeholder_text):
                          - For each database, DO NOT output duplicate rows with the same exact (Label, Categories) pair
                          - If a Label or Categories value cannot be quoted exactly from provided context, use the explicit fallback strings above instead of guessing
 
-                     8. HARMONIZATION ACROSS DATABASES (ONLY WHEN MULTIPLE DATABASES ARE SELECTED):
-                         - If the number of selected databases is greater than 1, ADD a final section titled: `## Harmonization Suggestions Across Databases`
-                         - In this section, include a markdown table with EXACTLY these columns:
+                    8. HARMONIZATION ACROSS DATABASES (ONLY WHEN MULTIPLE DATABASES ARE SELECTED):
+                            - If more than one database is selected, add a final section titled: `## Harmonization Suggestions Across Databases`
+                            - Main goal: identify plausible cross-database harmonization opportunities using observed labels and categories
+                            - Focus on practical harmonization candidates, not perfect one-to-one matches
+                            - Use ONLY variables shown in the provided metadata context
+                            - You may present this section as either:
+                                A) a concise narrative with bullets, or
+                                B) a markdown table when it improves clarity
+                            - If you use a table, a suggested structure is:
 
-                         | Harmonized Concept | Database-Specific Variables | Suggested Harmonized Coding | Notes / Caveats |
-                         |---|---|---|---|
+                            | Harmonized Concept | Candidate Variables by Database | Suggested Harmonization Approach | Caveats |
+                            |---|---|---|---|
 
-                         - STRICT SCOPE: This section is ONLY for cross-database harmonization, never within-database harmonization
-                         - Build each row only from variables that appear in the provided context
-                         - Only include a harmonization row if the harmonized concept has at least one usable variable from EVERY selected database listed under `Names of Selected Databases`
-                         - Exclude concepts that are missing in any selected database
-                         - For `Database-Specific Variables`, list database groups in the EXACT same order as the databases listed under `Names of Selected Databases`
-                         - Every harmonization row MUST explicitly mention ALL selected databases in `Database-Specific Variables`; if any selected database is missing in that row, DROP the row
-                         - Use this strict format for `Database-Specific Variables`: "DB1: var_a, var_b; DB2: var_x; DB3: var_m, var_n"
-                         - For `Suggested Harmonized Coding`, propose a practical mapping strategy grounded in observed labels/categories
-                         - For `Notes / Caveats`, mention comparability risks such as wording differences, wave differences, missing categories, and instrument differences
-                         - If the number of selected databases is 1 or less, DO NOT include any harmonization section
-                         - If the number of selected databases is greater than 1 but no concept is available across ALL selected databases, include the section with one row stating: "No robust cross-database harmonization candidates found across all selected databases."
+                            - You do NOT need to require every selected database to contribute to every harmonized concept
+                            - Prioritize concepts that are supported in multiple databases and explain where coverage is partial
+                            - Base mappings on semantic similarity in labels and category schemes; note recoding ideas when useful
+                            - Explicitly mention uncertainty and comparability risks (wording differences, category mismatches, wave/instrument differences, missing values)
+                            - If no meaningful harmonization opportunities are found, state that clearly in 1-2 sentences
                 
                      COMBINED EXAMPLE OF CORRECT FORMAT:
 
