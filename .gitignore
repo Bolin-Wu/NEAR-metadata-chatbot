@@ -12,7 +12,7 @@ venv/
 # Vector store database (large, regenerated on each run)
 chroma_prod_db/
 chroma_prod_db_backup_*/
-
+chroma_azure_db/
 
 # Data & indexes
 metadata_excels/
