@@ -4,7 +4,9 @@ import glob
 import argparse
 from datetime import datetime
 
-from langchain_huggingface import HuggingFaceEmbeddings
+import streamlit as st
+
+from langchain_openai import AzureOpenAIEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -13,9 +15,11 @@ from json_parser import parse_json_to_document
 import time
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-CHROMA_DB = "./chroma_prod_db"          # Production database
+EMBEDDING_MODEL = "text-embedding-3-small"
+CHROMA_DB = "./chroma_azure_db"
 DATA_ROOT = "./data"
+AZURE_OPENAI_API_VERSION = "2024-02-01"
+HUGGINGFACE_TARGET_REPO = st.secrets["HUGGINGFACE_TARGET_REPO"]
 
 # Chunk configuration
 # XML now uses one variable per document via parse_xml_to_documents()
@@ -23,9 +27,27 @@ JSON_CHUNK_SIZE = 1200
 JSON_CHUNK_OVERLAP = 200
 
 # Functions ─────────────────────────────────────────────────────────────────
-def get_embeddings():
-    """Initialize embeddings model."""
-    return HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
+def get_embeddings(args):
+    """Initialize Azure OpenAI embeddings model."""
+    api_key = st.secrets["AZURE_api_key"]
+    endpoint = st.secrets["AZURE_openai_endpoint"]
+
+    if not api_key:
+        raise ValueError(
+            "Missing Azure API key. Set AZURE_OPENAI_API_KEY or pass --azure-api-key."
+        )
+    if not endpoint:
+        raise ValueError(
+            "Missing Azure endpoint. Set AZURE_OPENAI_ENDPOINT or pass --azure-endpoint."
+        )
+
+    return AzureOpenAIEmbeddings(
+        model=args.embedding_model,
+        deployment=args.azure_deployment,
+        openai_api_version=args.azure_api_version,
+        azure_endpoint=endpoint,
+        api_key=api_key,
+    )
 
 def parse_args():
     """Parse command line arguments for retraining."""
@@ -45,7 +67,27 @@ def parse_args():
     parser.add_argument(
         "--embedding-model",
         default=EMBEDDING_MODEL,
-        help="Sentence-transformers embedding model name",
+        help="Azure OpenAI embedding model name",
+    )
+    parser.add_argument(
+        "--azure-deployment",
+        default=EMBEDDING_MODEL,
+        help="Azure OpenAI deployment name for embeddings",
+    )
+    parser.add_argument(
+        "--azure-endpoint",
+        default=None,
+        help="Azure OpenAI endpoint (defaults to AZURE_OPENAI_ENDPOINT)",
+    )
+    parser.add_argument(
+        "--azure-api-key",
+        default=None,
+        help="Azure OpenAI API key (defaults to AZURE_OPENAI_API_KEY)",
+    )
+    parser.add_argument(
+        "--azure-api-version",
+        default=AZURE_OPENAI_API_VERSION,
+        help="Azure OpenAI API version",
     )
     parser.add_argument(
         "--yes",
@@ -156,6 +198,8 @@ if __name__ == "__main__":
     print(f"Data root: {os.path.abspath(data_root)}")
     print(f"Target DB: {os.path.abspath(target_db)}")
     print(f"Embedding model: {args.embedding_model}")
+    print(f"Azure deployment: {args.azure_deployment}")
+    print(f"Azure API version: {args.azure_api_version}")
     
     databases = get_available_databases(data_root)
     
@@ -198,8 +242,8 @@ if __name__ == "__main__":
     # Train vector store (separate collection for each database)
     try:
         script_start = time.time()
-        embeddings = HuggingFaceEmbeddings(model_name=args.embedding_model)
-        print(f"\nCreating embeddings and storing in production database...")
+        embeddings = get_embeddings(args)
+        print(f"\nCreating Azure embeddings and storing in target database...")
         print(f"Each database will have its own collection.\n")
         
         total_items = 0
@@ -237,7 +281,7 @@ if __name__ == "__main__":
             f"   python -c \"import shutil; shutil.make_archive('{archive_name}', 'zip', '.', '{archive_name}')\""
         )
         print(
-            f"   hf upload bobo200612/near-chroma-prod-db ./{archive_name}.zip {archive_name}.zip --repo-type=dataset --commit-message 'xxxxx'"
+            f"   hf upload {HUGGINGFACE_TARGET_REPO} ./{archive_name}.zip {archive_name}.zip --repo-type=dataset --commit-message 'xxxxx'"
         )
             
     except Exception as e:

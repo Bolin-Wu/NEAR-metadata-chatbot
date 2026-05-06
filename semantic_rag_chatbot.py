@@ -8,12 +8,11 @@ from io import BytesIO
 import streamlit as st
 import pandas as pd
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.documents import Document
 from langchain_core.runnables import RunnablePassthrough
-from langchain_openai import ChatOpenAI  # For OpenAI-compatible endpoints
+from langchain_openai import AzureOpenAIEmbeddings, ChatOpenAI  # For OpenAI-compatible endpoints
 from langchain_core.prompts import PromptTemplate
 from dotenv import load_dotenv
 import shutil
@@ -43,8 +42,9 @@ if css_file.exists():
 else:
     logger.warning(f"CSS file not found at {css_file}. Styling may not be applied.")
 
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-CHROMA_DB = "./chroma_prod_db"          # Production database (cloud storage)
+EMBEDDING_MODEL = "text-embedding-3-small"
+CHROMA_DB = "./chroma_azure_db"
+AZURE_OPENAI_API_VERSION = "2024-02-01"
 DATA_ROOT = "./data"
 
 # Known databases (hardcoded as fallback when data/ folder not available)
@@ -79,6 +79,11 @@ try:
     AZURE_api_key = st.secrets["AZURE_api_key"]
 except (FileNotFoundError, KeyError, AttributeError):
     AZURE_api_key = os.getenv("AZURE_api_key")
+
+try:
+    AZURE_openai_endpoint = st.secrets["AZURE_openai_endpoint"]
+except (FileNotFoundError, KeyError, AttributeError):
+    AZURE_openai_endpoint = os.getenv("AZURE_openai_endpoint")
     
 
 # Cloud storage URL for production vector database (optional)
@@ -314,6 +319,9 @@ def initialize_production_db():
         st.error("❌ HUGGINGFACE_REPO_ID not configured. Please contact the maintainer.")
         st.stop()
     
+    db_folder_name = os.path.basename(os.path.normpath(CHROMA_DB))
+    db_archive_name = f"{db_folder_name}.zip"
+
     try:
         from huggingface_hub import hf_hub_download
         
@@ -323,12 +331,12 @@ def initialize_production_db():
         progress_placeholder.info("📥 Downloading production database from HuggingFace Hub...")
         
         # ─ Download the database zip file ──────────────────────────────────────
-        # Downloads chroma_prod_db.zip from the configured HuggingFace dataset
+        # Downloads the configured Chroma DB archive from the HuggingFace dataset
         # File is cached in ~/.cache/huggingface to avoid re-downloading
         try:
             zip_path = hf_hub_download(
                 repo_id=HUGGINGFACE_REPO_ID,
-                filename="chroma_prod_db.zip",
+                filename=db_archive_name,
                 repo_type="dataset",
                 cache_dir=Path.home() / ".cache" / "huggingface"
             )
@@ -355,12 +363,12 @@ def initialize_production_db():
             # ─ Handle different zip structures ─────────────────────────────────
             # The zip file might contain either:
             # A) Direct contents: chroma.sqlite3, UUID folders, etc. (typical case)
-            # B) Wrapped: A single "chroma_prod_db" folder containing everything
+            # B) Wrapped: A single DB folder containing everything
             #
             # We need to handle both cases to find the correct source path
-            if "chroma_prod_db" in extracted_contents and len(extracted_contents) == 1:
-                # Case B: Zip had a top-level chroma_prod_db wrapper folder
-                source_path = os.path.join(temp_dir, "chroma_prod_db")
+            if db_folder_name in extracted_contents and len(extracted_contents) == 1:
+                # Case B: Zip had a top-level DB wrapper folder
+                source_path = os.path.join(temp_dir, db_folder_name)
             else:
                 # Case A: Zip had direct contents (most common)
                 source_path = temp_dir
@@ -414,9 +422,23 @@ def initialize_production_db():
         st.error(f"❌ {e}")
         st.stop()
 
-@st.cache_resource(show_spinner="Preparing embeddings model...")
+@st.cache_resource(show_spinner="Preparing Azure embeddings model...")
 def get_embeddings():
-    return HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
+    if not AZURE_api_key:
+        st.error("❌ Missing AZURE_api_key. Configure it in Streamlit secrets or environment variables.")
+        st.stop()
+
+    if not AZURE_openai_endpoint:
+        st.error("❌ Missing AZURE_openai_endpoint. Configure it in Streamlit secrets or environment variables.")
+        st.stop()
+
+    return AzureOpenAIEmbeddings(
+        model=EMBEDDING_MODEL,
+        deployment=EMBEDDING_MODEL,
+        openai_api_version=AZURE_OPENAI_API_VERSION,
+        azure_endpoint=AZURE_openai_endpoint,
+        api_key=AZURE_api_key,
+    )
 
 
 def get_available_databases():
@@ -918,6 +940,13 @@ with st.sidebar:
         col1, col2, col3 = st.columns([0.5, 2.5, 0.5])
         with col2:
             st.image(str(logo_path), width='stretch')
+    st.markdown("---")
+
+    # Active vector DB indicator
+    active_db_name = os.path.basename(os.path.normpath(CHROMA_DB))
+    st.subheader("Vector Store")
+    st.caption(f"Active Chroma DB: {active_db_name}")
+    st.caption(f"Path: {os.path.abspath(CHROMA_DB)}")
     st.markdown("---")
     
     # Database selection
