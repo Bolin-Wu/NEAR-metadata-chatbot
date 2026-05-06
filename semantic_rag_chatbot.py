@@ -63,16 +63,18 @@ AZURE_FOUNDRY_BASE_URL = "https://llm-chatbot-api.cognitiveservices.azure.com/op
 # LLM Hyperparameters
 LLM_TEMPERATURE = 0.3           # Balanced: accurate answers with flexibility for general knowledge (0.0=deterministic, 1.0=creative)
 
-# Retrieval Parameters
-RETRIEVAL_K_BACKGROUND = 5      # Top-5 docs for cohort background context
-RETRIEVAL_K_CONTEXT = 100        # Top-100 docs for variable definitions (increased for better category capture)
-EXACT_MATCH_LIMIT = 3          # Exact variable-name hits to merge ahead of semantic results
-BACKGROUND_ENRICH_FALLBACK_DOCS = 3  # Fallback docs used when no exact variable match is found
-BACKGROUND_ENRICH_MAX_DOCS = 3       # Max docs used to extract enrichment terms
-MAX_SELECTED_DATABASES_GPT = 6       # GPT path can handle broader multi-database context
-MERGED_CONTEXT_K_MAX_GPT = 48        # Global merged context cap for GPT
-BACKGROUND_PER_DB_K = 2              # Small per-database budget for cohort background
-BACKGROUND_GLOBAL_MAX_GPT = 10
+# Retrieval Tuning Knobs (primary parameters)
+TUNE_K_CONTEXT = 100              # Semantic retrieval breadth for variable definitions
+TUNE_MERGED_CONTEXT_CAP = 48      # Final merged context size sent to the LLM
+TUNE_MAX_SELECTED_DATABASES = 6   # Max databases queried in one request
+TUNE_EXACT_MATCH_LIMIT = 3        # Exact variable-code hits per lookup
+
+# Retrieval Parameters (derived; keep these mostly unchanged)
+BACKGROUND_PER_DB_K = 2
+BACKGROUND_GLOBAL_MAX_GPT = min(10, TUNE_MAX_SELECTED_DATABASES * BACKGROUND_PER_DB_K)
+RETRIEVAL_K_BACKGROUND = BACKGROUND_PER_DB_K
+BACKGROUND_ENRICH_FALLBACK_DOCS = min(3, max(1, TUNE_EXACT_MATCH_LIMIT))
+BACKGROUND_ENRICH_MAX_DOCS = BACKGROUND_ENRICH_FALLBACK_DOCS
 
 # Safe way to get API keys
 try:
@@ -337,7 +339,7 @@ def initialize_production_db():
         # ─ Show download progress to user ──────────────────────────────────────
         # Create a placeholder that we'll update as the download progresses
         progress_placeholder = st.empty()
-        progress_placeholder.info("📥 Downloading production database from HuggingFace Hub...")
+        progress_placeholder.info("📥 Downloading vector database from HuggingFace Hub...")
         
         # ─ Download the database zip file ──────────────────────────────────────
         # Downloads the configured Chroma DB archive from the HuggingFace dataset
@@ -532,7 +534,7 @@ def get_relevant_background(query, vectorstores, llm_model=None, context_docs=No
     try:
         # Perform semantic search on the entire collection
         background_global_cap = BACKGROUND_GLOBAL_MAX_GPT
-        background_per_db_k = max(1, min(RETRIEVAL_K_BACKGROUND, BACKGROUND_PER_DB_K))
+        background_per_db_k = BACKGROUND_PER_DB_K
         background_query = query
 
         # If the user query looks like an exact variable code, enrich background
@@ -731,8 +733,8 @@ def interleave_document_groups(document_groups: list[list[Document]]) -> list[Do
 
 def get_retrieval_budget(llm_model: str | None) -> dict:
     """Return model-aware retrieval caps for multi-database querying."""
-    max_selected_databases = MAX_SELECTED_DATABASES_GPT
-    merged_context_cap = MERGED_CONTEXT_K_MAX_GPT
+    max_selected_databases = TUNE_MAX_SELECTED_DATABASES
+    merged_context_cap = TUNE_MERGED_CONTEXT_CAP
 
     return {
         "max_selected_databases": max_selected_databases,
@@ -778,7 +780,7 @@ def exact_variable_name_lookup(query: str, vectorstore) -> list[Document]:
             payload = collection.get(
                 where={"variable_name": variant},
                 include=["documents", "metadatas"],
-                limit=EXACT_MATCH_LIMIT,
+                limit=TUNE_EXACT_MATCH_LIMIT,
             )
             exact_docs.extend(_collection_payload_to_documents(payload))
 
@@ -789,7 +791,7 @@ def exact_variable_name_lookup(query: str, vectorstore) -> list[Document]:
             where={"type": "variable_definitions"},
             where_document={"$contains": f"Variable: {candidate}"},
             include=["documents", "metadatas"],
-            limit=EXACT_MATCH_LIMIT,
+            limit=TUNE_EXACT_MATCH_LIMIT,
         )
         exact_docs.extend(_collection_payload_to_documents(payload))
 
@@ -823,7 +825,7 @@ def filter_and_organize_context(query, vectorstores, llm_model=None):
                 icon="⚠️",
             )
 
-        k_context_base = RETRIEVAL_K_CONTEXT
+        k_context_base = TUNE_K_CONTEXT
 
         per_db_k = max(4, int(k_context_base / max(1, len(vectorstores))))
         merged_context_cap = budget["merged_context_cap"]
