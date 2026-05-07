@@ -8,8 +8,8 @@ from io import BytesIO
 import streamlit as st
 import pandas as pd
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
+from langchain_openai import AzureOpenAIEmbeddings
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.documents import Document
 from langchain_core.runnables import RunnablePassthrough
@@ -44,8 +44,11 @@ if css_file.exists():
 else:
     logger.warning(f"CSS file not found at {css_file}. Styling may not be applied.")
 
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-CHROMA_DB = "./chroma_prod_db"          # Production database (cloud storage)
+AZURE_EMBEDDING_API_VERSION = "2024-02-01"
+EMBEDDING_MODEL_NAME = "text-embedding-3-small"
+CHROMA_DB = "./chroma_azure_db"
+CHROMA_ZIP_FILENAME = "chroma_azure_db.zip"
+HUGGINGFACE_REPO_SECRET_NAME = "HUGGINGFACE_AZURE_REPO"
 DATA_ROOT = "./data"
 
 # Known databases (hardcoded as fallback when data/ folder not available)
@@ -55,9 +58,9 @@ KNOWN_DATABASES = [
 ]
 
 # LLM Model Names (for consistency across the app)
-LLM_MODEL_GROQ = "Llama 3.1 8B (Groq)"
-LLM_MODEL_GPT = "GPT-5.4 Mini (Azure)"
-LLM_MODEL_XAI_GROK = "Grok 4.1 Fast Reasoning (xAI)"
+LLM_MODEL_GROQ = "Llama 3.1 8B (Groq free tier)"
+LLM_MODEL_GPT = "GPT-5.4 Mini"
+LLM_MODEL_XAI_GROK = "Grok 4.1 Fast Reasoning"
 
 # LLM Model IDs (technical identifiers for API calls)
 GROQ_MODEL_ID = "llama-3.1-8b-instant"
@@ -92,6 +95,11 @@ except (FileNotFoundError, KeyError, AttributeError):
     AZURE_api_key = os.getenv("AZURE_api_key")
 
 try:
+    AZURE_openai_endpoint = st.secrets["AZURE_openai_endpoint"]
+except (FileNotFoundError, KeyError, AttributeError):
+    AZURE_openai_endpoint = os.getenv("AZURE_openai_endpoint")
+
+try:
     XAI_api_key = st.secrets["XAI_api_key"]
 except (FileNotFoundError, KeyError, AttributeError):
     XAI_api_key = os.getenv("XAI_api_key")
@@ -100,9 +108,9 @@ except (FileNotFoundError, KeyError, AttributeError):
 # Cloud storage URL for production vector database (optional)
 # Use HuggingFace Hub: huggingface_hub.download() with repo_id
 try:
-    HUGGINGFACE_REPO_ID = st.secrets.get("HUGGINGFACE_REPO_ID")
+    HUGGINGFACE_AZURE_REPO_ID = st.secrets.get("HUGGINGFACE_AZURE_REPO")
 except:
-    HUGGINGFACE_REPO_ID = os.getenv("HUGGINGFACE_REPO_ID")
+    HUGGINGFACE_AZURE_REPO_ID = os.getenv("HUGGINGFACE_AZURE_REPO")
 
 # ── Functions ─────────────────────────────────────────────────────────────────
 
@@ -301,7 +309,7 @@ def export_tables_to_excel(tables_with_headers):
     return output
 
 
-def initialize_production_db():
+def initialize_production_db(chroma_db: str, hf_repo_id: str, zip_filename: str):
     """Download production database from HuggingFace Hub if not present locally.
     
     This function:
@@ -317,14 +325,14 @@ def initialize_production_db():
     # ─ Check if database already exists locally ───────────────────────────────
     # Skip download if database directory exists and contains files
     # This prevents unnecessary downloads on subsequent app restarts
-    if os.path.exists(CHROMA_DB) and os.listdir(CHROMA_DB):
+    if os.path.exists(chroma_db) and os.listdir(chroma_db):
         return
     
     # ─ Validate required configuration ─────────────────────────────────────────
     # Stop immediately if HuggingFace repository ID is not configured
     # This is a required secret in Streamlit Cloud
-    if not HUGGINGFACE_REPO_ID:
-        st.error("❌ HUGGINGFACE_REPO_ID not configured. Please contact the maintainer.")
+    if not hf_repo_id:
+        st.error("❌ HUGGINGFACE_AZURE_REPO not configured. Please contact the maintainer.")
         st.stop()
     
     try:
@@ -340,12 +348,12 @@ def initialize_production_db():
         # File is cached in ~/.cache/huggingface to avoid re-downloading
         try:
             zip_path = hf_hub_download(
-                repo_id=HUGGINGFACE_REPO_ID,
-                filename="chroma_prod_db.zip",
+                repo_id=hf_repo_id,
+                filename=zip_filename,
                 repo_type="dataset",
                 cache_dir=Path.home() / ".cache" / "huggingface"
             )
-            logger.info(f"Downloaded database from HuggingFace: {HUGGINGFACE_REPO_ID}")
+            logger.info(f"Downloaded database from HuggingFace: {hf_repo_id}")
         except Exception as e:
             # Handle download errors (network issues, missing file, auth errors, etc.)
             error_msg = f"Failed to download from HuggingFace: {e}"
@@ -371,9 +379,9 @@ def initialize_production_db():
             # B) Wrapped: A single "chroma_prod_db" folder containing everything
             #
             # We need to handle both cases to find the correct source path
-            if "chroma_prod_db" in extracted_contents and len(extracted_contents) == 1:
-                # Case B: Zip had a top-level chroma_prod_db wrapper folder
-                source_path = os.path.join(temp_dir, "chroma_prod_db")
+            if "chroma_azure_db" in extracted_contents and len(extracted_contents) == 1:
+                # Case B: Zip had a top-level chroma_azure_db wrapper folder
+                source_path = os.path.join(temp_dir, "chroma_azure_db")
             else:
                 # Case A: Zip had direct contents (most common)
                 source_path = temp_dir
@@ -389,16 +397,16 @@ def initialize_production_db():
             
             # ─ Clean up and move to final location ─────────────────────────────
             # Remove any old database directory to prevent conflicts
-            if os.path.exists(CHROMA_DB):
-                shutil.rmtree(CHROMA_DB)
+            if os.path.exists(chroma_db):
+                shutil.rmtree(chroma_db)
             
             # Move the extracted database to its final location
             # This makes it available to Chroma at CHROMA_DB path
-            shutil.move(source_path, CHROMA_DB)
+            shutil.move(source_path, chroma_db)
             
             # ─ Final verification ─────────────────────────────────────────────
             # Confirm the move was successful by checking for the SQLite file
-            if os.path.exists(os.path.join(CHROMA_DB, "chroma.sqlite3")):
+            if os.path.exists(os.path.join(chroma_db, "chroma.sqlite3")):
                 logger.info("Database extracted and ready")
                 progress_placeholder.success("✅ Database downloaded and ready!")
             else:
@@ -429,20 +437,25 @@ def initialize_production_db():
 
 @st.cache_resource(show_spinner="Preparing embeddings model...")
 def get_embeddings():
-    return HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
+    return AzureOpenAIEmbeddings(
+        azure_deployment=EMBEDDING_MODEL_NAME,
+        azure_endpoint=AZURE_openai_endpoint,
+        api_key=AZURE_api_key,
+        api_version=AZURE_EMBEDDING_API_VERSION,
+    )
 
 
-def get_available_databases():
+def get_available_databases(chroma_db: str):
     """Get list of available databases by querying Chroma collections."""
     databases = []
     
     try:
-        if not os.path.exists(CHROMA_DB):
-            st.error(f"❌ Database directory not found: {CHROMA_DB}")
+        if not os.path.exists(chroma_db):
+            st.error(f"❌ Database directory not found: {chroma_db}")
             st.stop()
         
-        if not os.listdir(CHROMA_DB):
-            st.error(f"❌ Database directory is empty: {CHROMA_DB}")
+        if not os.listdir(chroma_db):
+            st.error(f"❌ Database directory is empty: {chroma_db}")
             st.stop()
         
         embeddings = get_embeddings()
@@ -451,7 +464,7 @@ def get_available_databases():
             collection_name = f"{db_name.lower()}_metadata"
             try:
                 vectorstore = Chroma(
-                    persist_directory=CHROMA_DB,
+                    persist_directory=chroma_db,
                     embedding_function=embeddings,
                     collection_name=collection_name
                 )
@@ -799,18 +812,18 @@ def get_llm(model_name: str):
 
 st.title("NEAR Metadata Chatbot")
 
-# Verify HUGGINGFACE_REPO_ID is available before initializing database
-if not HUGGINGFACE_REPO_ID:
-    st.error("❌ HUGGINGFACE_REPO_ID not configured in Streamlit secrets.")
+# Verify HUGGINGFACE_AZURE_REPO is available before initializing database
+if not HUGGINGFACE_AZURE_REPO_ID:
+    st.error(f"❌ {HUGGINGFACE_REPO_SECRET_NAME} not configured in Streamlit secrets.")
     st.stop()
 
 # Initialize production database from cloud if needed (MUST BE FIRST!)
-initialize_production_db()
+initialize_production_db(CHROMA_DB, HUGGINGFACE_AZURE_REPO_ID, CHROMA_ZIP_FILENAME)
 
 # Initialize available databases (after database is ready)
-if "available_databases_loaded" not in st.session_state:
+if not st.session_state.get("available_databases_loaded", False):
     with st.spinner("Discovering available databases..."):
-        st.session_state.available_databases = get_available_databases()
+        st.session_state.available_databases = get_available_databases(CHROMA_DB)
         st.session_state.available_databases_loaded = True
     
     if not st.session_state.available_databases:
@@ -862,14 +875,14 @@ with st.sidebar:
             index=0,
             key="database_radio"
         )
-        
-        # Switch to selected database (from cache - instant!)
-        if selected_database != st.session_state.selected_database:
-            if selected_database in st.session_state.vectorstores_cache:
-                st.session_state.vectorstore = st.session_state.vectorstores_cache[selected_database]
-                st.session_state.selected_database = selected_database
-            else:
-                st.error(f"Vector store for {selected_database} not available")
+
+        # Always bind the selected DB to the current embedding-model cache.
+        # This avoids stale state on the first query after switching embeddings.
+        if selected_database in st.session_state.vectorstores_cache:
+            st.session_state.vectorstore = st.session_state.vectorstores_cache[selected_database]
+            st.session_state.selected_database = selected_database
+        else:
+            st.error(f"Vector store for {selected_database} not available")
         
     else:
         st.warning("No databases available")
@@ -893,7 +906,7 @@ with st.sidebar:
         st.caption("🚀 Fast reasoning with xAI Grok 4.1")
     else:
         st.caption("⚡ Faster responses with slightly smaller context window (may miss some category info)")
-    
+
     st.markdown("---")
     
     # Session usage display (Azure GPT only)
@@ -995,7 +1008,7 @@ if prompt := st.chat_input(placeholder_text):
                     llm = get_llm(st.session_state.selected_llm_model)
                     
                     # Display which model is being used
-                    st.caption(f"🔧 Using: {st.session_state.selected_llm_model}")
+                    st.caption(f"🔧 Using: {st.session_state.selected_llm_model} | Embedding: {EMBEDDING_MODEL_NAME}")
                     
                     # Get context (already filtered to selected database via collection)
                     # Returns both context text and document list
