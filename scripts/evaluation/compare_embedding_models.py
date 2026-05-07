@@ -28,7 +28,7 @@ OPENAI_MODEL_NAME = "text-embedding-3-small"
 HF_DB_DEFAULT = "./chroma_prod_db"
 OPENAI_DB_DEFAULT = "./chroma_azure_db"
 DEFAULT_QUERIES_FILE = "scripts/evaluation/aging_semantic_queries.json"
-DEFAULT_K = 3
+DEFAULT_K = 8
 DEFAULT_PREVIEW_CHARS = 220
 
 
@@ -73,7 +73,7 @@ def parse_args() -> argparse.Namespace:
         "--k",
         type=int,
         default=DEFAULT_K,
-        help=f"Top-k retrieved docs per query (max 3, default: {DEFAULT_K}).",
+        help=f"Top-k retrieved docs per query (default: {DEFAULT_K}).",
     )
     parser.add_argument(
         "--preview-chars",
@@ -199,7 +199,6 @@ def get_store(
 
 
 def retrieve_hits(store: Chroma, query: str, k: int) -> list[Hit]:
-    k = min(k, 3)
     scored = store.similarity_search_with_score(
         query,
         k=k,
@@ -261,7 +260,7 @@ def run() -> None:
     print("NEAR Semantic Search Embedding Comparison")
     print("=" * 88)
     print(f"Queries: {len(queries)}")
-    print(f"Top-k: {min(args.k, 3)}")
+    print(f"Top-k: {args.k}")
     print(f"Model A: {args.hf_model} | DB: {hf_db}")
     print(f"Model B: {args.openai_model} | DB: {openai_db}")
 
