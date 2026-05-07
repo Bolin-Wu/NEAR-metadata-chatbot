@@ -4,9 +4,9 @@ Use this to inspect semantic search results after migrating XML ingestion to
 one-variable-per-document.
 
 Examples:
-  python scripts/test_retriever.py --database Betula --query "blood pressure"
-  python scripts/test_retriever.py --database SNAC-K --query "frailty" --k 20
-  python scripts/test_retriever.py --database H70 --query "cohort background" --type database_description
+    python scripts/evaluation/test_retriever.py --database Betula --query "blood pressure"
+    python scripts/evaluation/test_retriever.py --database SNAC-K --query "frailty" --k 20
+    python scripts/evaluation/test_retriever.py --database H70 --query "cohort background" --type database_description
 """
 
 from __future__ import annotations

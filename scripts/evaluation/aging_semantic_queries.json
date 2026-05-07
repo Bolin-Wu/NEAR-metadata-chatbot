@@ -1,0 +1,67 @@
+[
+  {
+    "database": "SNAC-K",
+    "query": "Which variables capture bathing, dressing, toileting, and transferring limitations?",
+    "expected_keywords": ["adl", "bathing", "dressing", "toileting", "transferring"]
+  },
+  {
+    "database": "SNAC-N",
+    "query": "Find variables about IADL such as shopping, meal preparation, and managing money.",
+    "expected_keywords": ["iadl", "shopping", "meal", "money", "daily living"]
+  },
+  {
+    "database": "H70",
+    "query": "What variables measure systolic and diastolic blood pressure?",
+    "expected_keywords": ["blood pressure", "systolic", "diastolic", "hypertension"]
+  },
+  {
+    "database": "SATSA",
+    "query": "List variables related to frailty indicators and physical function decline.",
+    "expected_keywords": ["frailty", "physical function", "mobility", "gait", "strength"]
+  },
+  {
+    "database": "Betula",
+    "query": "Which cognitive variables assess memory and executive function?",
+    "expected_keywords": ["memory", "executive", "cognition", "cognitive", "test"]
+  },
+  {
+    "database": "GAS_SNAC_S",
+    "query": "Find variables on sleep duration, sleep quality, and sleep disturbance.",
+    "expected_keywords": ["sleep", "insomnia", "duration", "quality", "disturbance"]
+  },
+  {
+    "database": "SWEOLD",
+    "query": "What variables measure depressive symptoms, sadness, or psychological distress?",
+    "expected_keywords": ["depression", "depressive", "sadness", "distress", "mood"]
+  },
+  {
+    "database": "GENDER",
+    "query": "Find social isolation and loneliness variables among older adults.",
+    "expected_keywords": ["loneliness", "social", "isolation", "network", "support"]
+  },
+  {
+    "database": "KP",
+    "query": "Which variables describe nutrition, appetite, and dietary intake?",
+    "expected_keywords": ["nutrition", "diet", "appetite", "intake", "food"]
+  },
+  {
+    "database": "OCTO-Twin",
+    "query": "List variables for multimorbidity and chronic disease burden.",
+    "expected_keywords": ["multimorbidity", "chronic", "disease", "comorbidity", "burden"]
+  },
+  {
+    "database": "SNAC-B",
+    "query": "Find variables about falls, balance, and mobility limitations.",
+    "expected_keywords": ["fall", "balance", "mobility", "walking", "gait"]
+  },
+  {
+    "database": "TryBo",
+    "query": "What variables are useful for ADL and independent living support needs?",
+    "expected_keywords": ["adl", "independent", "living", "support", "care"]
+  },
+  {
+    "database": "SNAC-K",
+    "query": "Is there ATC and ICD code?",
+    "expected_keywords": ["atc", "icd", "code", "classification"]
+  }
+]

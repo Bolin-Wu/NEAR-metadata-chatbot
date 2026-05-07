@@ -1,5 +1,7 @@
 import os
-from langchain_core.documents import Document
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from xml_parser import parse_xml_to_document
 from json_parser import parse_json_to_document
