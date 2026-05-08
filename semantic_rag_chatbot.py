@@ -832,7 +832,6 @@ if not st.session_state.get("available_databases_loaded", False):
         
         Please try:
         - Click "Refresh" in the sidebar to retry
-        - Restart the app
         - Contact the maintainer
         """)
 
