@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 import re
 from io import BytesIO
+import time
 
 import streamlit as st
 import pandas as pd
@@ -322,27 +323,49 @@ def initialize_production_db(chroma_db: str, hf_repo_id: str, zip_filename: str)
     The downloaded database contains pre-built Chroma vector collections
     for all cohort datasets (Betula, SNAC-K, etc.).
     """
+    abs_chroma_db = os.path.abspath(chroma_db)
+    db_parent = os.path.dirname(abs_chroma_db) or "."
+    lock_dir = f"{abs_chroma_db}.init.lock"
+
     # ─ Check if database already exists locally ───────────────────────────────
     # Skip download if database directory exists and contains files
     # This prevents unnecessary downloads on subsequent app restarts
-    if os.path.exists(chroma_db) and os.listdir(chroma_db):
+    if os.path.exists(abs_chroma_db) and os.listdir(abs_chroma_db):
         return
-    
-    # ─ Validate required configuration ─────────────────────────────────────────
-    # Stop immediately if HuggingFace repository ID is not configured
-    # This is a required secret in Streamlit Cloud
-    if not hf_repo_id:
-        st.error("❌ HUGGINGFACE_AZURE_REPO not configured. Please contact the maintainer.")
-        st.stop()
+
+    # ─ Acquire a simple process-safe lock ─────────────────────────────────────
+    # Streamlit can trigger concurrent reruns; prevent overlapping installs.
+    lock_acquired = False
+    lock_timeout_seconds = 120
+    lock_start = time.time()
+    while not lock_acquired:
+        try:
+            os.mkdir(lock_dir)
+            lock_acquired = True
+        except FileExistsError:
+            # Another process/session is currently installing the DB.
+            if os.path.exists(abs_chroma_db) and os.listdir(abs_chroma_db):
+                return
+            if (time.time() - lock_start) > lock_timeout_seconds:
+                st.error("❌ Timed out waiting for database initialization lock.")
+                st.stop()
+            time.sleep(0.5)
     
     try:
+        # ─ Validate required configuration ─────────────────────────────────────
+        # Stop immediately if HuggingFace repository ID is not configured
+        # This is a required secret in Streamlit Cloud
+        if not hf_repo_id:
+            st.error("❌ HUGGINGFACE_AZURE_REPO not configured. Please contact the maintainer.")
+            st.stop()
+
         from huggingface_hub import hf_hub_download
-        
+
         # ─ Show download progress to user ──────────────────────────────────────
         # Create a placeholder that we'll update as the download progresses
         progress_placeholder = st.empty()
         progress_placeholder.info("📥 Downloading production database from HuggingFace Hub...")
-        
+
         # ─ Download the database zip file ──────────────────────────────────────
         # Downloads chroma_prod_db.zip from the configured HuggingFace dataset
         # File is cached in ~/.cache/huggingface to avoid re-downloading
@@ -360,19 +383,19 @@ def initialize_production_db(chroma_db: str, hf_repo_id: str, zip_filename: str)
             logger.error(error_msg)
             progress_placeholder.error(f"❌ {error_msg}")
             st.stop()
-        
+
         # ─ Extract the downloaded archive ──────────────────────────────────────
         # Update progress message and create temporary directory for extraction
         progress_placeholder.info("📦 Extracting database...")
         temp_dir = tempfile.mkdtemp()
-        
+
         try:
             # Extract all files from the zip archive
             with zipfile.ZipFile(zip_path, "r") as zip_ref:
                 zip_ref.extractall(temp_dir)
-            
+
             extracted_contents = os.listdir(temp_dir)
-            
+
             # ─ Handle different zip structures ─────────────────────────────────
             # The zip file might contain either:
             # A) Direct contents: chroma.sqlite3, UUID folders, etc. (typical case)
@@ -385,7 +408,7 @@ def initialize_production_db(chroma_db: str, hf_repo_id: str, zip_filename: str)
             else:
                 # Case A: Zip had direct contents (most common)
                 source_path = temp_dir
-            
+
             # ─ Verify database integrity ──────────────────────────────────────
             # The SQLite database file (chroma.sqlite3) must exist
             # If missing, the zip was corrupted or incompatible
@@ -394,26 +417,37 @@ def initialize_production_db(chroma_db: str, hf_repo_id: str, zip_filename: str)
                 error_files = os.listdir(source_path)[:5]
                 progress_placeholder.error(f"❌ Database files corrupted. Found: {error_files}")
                 st.stop()
-            
-            # ─ Clean up and move to final location ─────────────────────────────
-            # Remove any old database directory to prevent conflicts
-            if os.path.exists(chroma_db):
-                shutil.rmtree(chroma_db)
-            
-            # Move the extracted database to its final location
-            # This makes it available to Chroma at CHROMA_DB path
-            shutil.move(source_path, chroma_db)
-            
+
+            # ─ Clean up and copy to final location via staging ─────────────────
+            # Avoid direct cross-filesystem moves from /tmp and ensure destination
+            # parent directories exist before final swap.
+            os.makedirs(db_parent, exist_ok=True)
+            staging_path = f"{abs_chroma_db}.staging"
+
+            if os.path.exists(staging_path):
+                shutil.rmtree(staging_path)
+
+            shutil.copytree(source_path, staging_path)
+
+            if not os.path.exists(os.path.join(staging_path, "chroma.sqlite3")):
+                progress_placeholder.error("❌ Staging verification failed (missing chroma.sqlite3).")
+                st.stop()
+
+            if os.path.exists(abs_chroma_db):
+                shutil.rmtree(abs_chroma_db)
+
+            shutil.move(staging_path, abs_chroma_db)
+
             # ─ Final verification ─────────────────────────────────────────────
             # Confirm the move was successful by checking for the SQLite file
-            if os.path.exists(os.path.join(chroma_db, "chroma.sqlite3")):
+            if os.path.exists(os.path.join(abs_chroma_db, "chroma.sqlite3")):
                 logger.info("Database extracted and ready")
                 progress_placeholder.success("✅ Database downloaded and ready!")
             else:
                 # Move succeeded but database file is missing (should never happen)
                 progress_placeholder.error("❌ Database extraction failed")
                 st.stop()
-                
+
         except Exception as e:
             # Handle zip extraction or file operation errors
             logger.error(f"Extraction failed: {e}")
@@ -424,7 +458,7 @@ def initialize_production_db(chroma_db: str, hf_repo_id: str, zip_filename: str)
             # Always remove temp directory, even if an error occurred
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
-        
+
     except ImportError:
         # Handle missing huggingface_hub package
         st.error("❌ Install huggingface_hub: `pip install huggingface_hub`")
@@ -434,6 +468,9 @@ def initialize_production_db(chroma_db: str, hf_repo_id: str, zip_filename: str)
         logger.error(f"Unexpected error: {e}")
         st.error(f"❌ {e}")
         st.stop()
+    finally:
+        if os.path.exists(lock_dir):
+            shutil.rmtree(lock_dir)
 
 @st.cache_resource(show_spinner="Preparing embeddings model...")
 def get_embeddings():
