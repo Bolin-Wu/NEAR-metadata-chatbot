@@ -1109,7 +1109,7 @@ with col2:
     st.caption("- Suggest variables for frailty index.")
 with col3:
     st.caption("- How do you assess mental health?")
-    st.caption("- List ADL variables and map each to core ADL, ADL+IADL, and give me harmonization suggestion.")
+    st.caption("- List ADL variables and map each to core ADL, and IADL.")
     st.caption("- Give all bathing, dressing, toileting, transferring variables with source and categories.")
 
 
