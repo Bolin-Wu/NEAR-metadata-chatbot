@@ -113,6 +113,103 @@ try:
 except:
     HUGGINGFACE_AZURE_REPO_ID = os.getenv("HUGGINGFACE_AZURE_REPO")
 
+
+# Keep instructions as a stable, shared prefix to improve provider-side token cache hit rates.
+METADATA_PROMPT_TEMPLATE = """You are an expert in epidemiology and aging research, specializing in cohort study metadata. CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly provided in NEAR metadata below.
+
+COHORT BACKGROUND:
+{cohort_background}
+
+---
+
+Your task is to answer questions about variables and metadata from this cohort.
+
+### NEAR metadata (ONLY SOURCE OF TRUTH):
+Each block below represents one retrieved variable definition.
+Each block begins with a header in this format:
+[Source: source_file_name | Variable: variable_name]
+{context}
+
+### Question from user:
+{question}
+
+### Your Response Instructions:
+- Treat every question as a single-turn request based only on the current question and provided metadata context
+- DO NOT include follow-up offers such as "If you want, I can...", "Would you like me to...", or "I can also..."
+- Group related variables by theme
+- Start with a clear, natural explanation of the topic based on the related cohort background
+- Use your own words to describe what the variables measure
+- Then, present the variable information in a markdown table with these columns:
+
+| Variable Name | Label | Categories | Source |
+|---|---|---|---|
+| variable_name | What it measures in plain English | Category values if applicable | source_file_name |
+
+================================================================
+CRITICAL RULES FOR EXTRACTING DATA (READ CAREFULLY):
+================================================================
+
+1. VARIABLE NAMES (Column 1):
+    - EXTRACT EXACTLY the text that appears after "Variable: " in the source data
+    - Copy-paste the exact variable name - do NOT modify, shorten, or translate
+    - Do NOT use field names like "Description" or "Label" instead
+    - FORBIDDEN: Do NOT invent variable names not in the source
+    - EXAMPLE RIGHT: Source has "Variable: löpnr". Write "löpnr" exactly
+    - EXAMPLE WRONG: Inventing "participant_age" when source only has "löpnr"
+
+2. LABELS (Column 2):
+    - Use the "Label:" field value EXACTLY as written in source data
+    - Do NOT shorten, paraphrase, or interpret the label
+
+3. CATEGORIES (Column 3):
+    - Extract category values EXACTLY as they appear in the source data, typically in a "Categories:" field
+    - FORMAT STRICTLY as: "1=value1, 2=value2, 3=value3" (number=description, comma-separated, NO SEMICOLONS)
+    - If no categories exist, write "N/A"
+    - Do NOT invent category mappings not in the source
+
+4. SOURCE (Column 4):
+    - Extract from the header "[Source: filename | Variable: variable_name]" at the start of each block
+    - Must be present for EVERY variable (required field)
+    - Use the exact source filename provided
+
+5. DEDUPLICATION:
+    - Variables with identical Label and Categories are the same variable collected across different time points
+    - COMBINES these into a single row with all variable names and sources listed
+    - This provides visibility into data collection across waves while avoiding redundancy
+
+6. VALIDATION (CRITICAL - MUST FOLLOW):
+    - EVERY row must have ALL 4 columns completely filled (NO EMPTY CELLS)
+    - NEVER pad rows with empty cells or partial data
+    - Every variable name must come from the source data
+    - If data is missing from source, DO NOT hallucinate it
+    - Double-check: Each variable in your table should be traceable to the source context
+    - If the last row is incomplete, DELETE IT and end the table cleanly
+
+DETAILED EXAMPLES OF CORRECT FORMAT:
+
+Example 1 - Demographics in SNAC-K:
+"In SNAC-K, several variables measure basic demographics. Each participant has a unique identifier and recorded biological sex."
+
+| Variable Name | Label | Categories | Source |
+|---|---|---|---|
+| löpnr | Unique participant identifier number | N/A | SNAC_K_Baseline |
+| kön | Participant's biological sex | 1=man, 2=woman | SNAC_K_Baseline |
+
+Example 2 - Physical Measurements:
+"Height and weight are measured at baseline assessment."
+
+| Variable Name | Label | Categories | Source |
+|---|---|---|---|
+| height_cm | Height in centimeters | N/A | H70_Baseline_Form |
+| weight_kg | Body weight in kilograms | N/A | H70_Baseline_Form |
+
+Answer:"""
+
+METADATA_PROMPT = PromptTemplate(
+     template=METADATA_PROMPT_TEMPLATE,
+     input_variables=["cohort_background", "context", "question"],
+)
+
 # ── Functions ─────────────────────────────────────────────────────────────────
 
 def _find_table_blocks(text):
@@ -701,6 +798,34 @@ def deduplicate_documents(documents: list[Document]) -> list[Document]:
     return unique_docs
 
 
+def format_context_for_prompt(documents: list[Document]) -> str:
+    """Format retrieval docs into a deterministic context block for prompting."""
+    # Stable ordering keeps prompt prefixes more consistent across similar queries.
+    sorted_docs = sorted(
+        documents,
+        key=lambda doc: (
+            ((doc.metadata or {}).get("source") or "").lower(),
+            ((doc.metadata or {}).get("variable_name") or "").lower(),
+            (doc.page_content or ""),
+        ),
+    )
+
+    context_parts = []
+    for doc in sorted_docs:
+        source = (doc.metadata or {}).get("source", "Unknown")
+        variable_name = (doc.metadata or {}).get("variable_name")
+
+        if source.endswith(".xml"):
+            source = source[:-4]
+
+        if variable_name:
+            context_parts.append(f"[Source: {source} | Variable: {variable_name}]\n{doc.page_content}")
+        else:
+            context_parts.append(f"[Source: {source}]\n{doc.page_content}")
+
+    return "\n\n---\n\n".join(context_parts)
+
+
 def exact_variable_name_lookup(query: str, vectorstore) -> list[Document]:
     """Look up variable documents by exact metadata match before semantic search."""
     if vectorstore is None:
@@ -779,22 +904,8 @@ def filter_and_organize_context(query, vectorstore, llm_model=None):
             f"| Final docs: {len(var_defs)} | Model: {llm_model}"
         )
         
-        # Include source information in context
-        context_parts = []
-        for doc in var_defs:
-            source = doc.metadata.get("source", "Unknown")
-            variable_name = doc.metadata.get("variable_name")
-            # Remove .xml suffix if present
-            if source.endswith(".xml"):
-                source = source[:-4]
-
-            if variable_name:
-                context_parts.append(f"[Source: {source} | Variable: {variable_name}]\n{doc.page_content}")
-            else:
-                context_parts.append(f"[Source: {source}]\n{doc.page_content}")
-        
-        context_text = "\n\n---\n\n".join(context_parts)
-        logger.debug(f"Final context: {len(context_parts)} variable definitions included ({len(context_text)} chars)")
+        context_text = format_context_for_prompt(var_defs)
+        logger.debug(f"Final context: {len(var_defs)} variable definitions included ({len(context_text)} chars)")
         return context_text, var_defs
     except Exception as e:
         error_msg = f"Error retrieving context: {e}"
@@ -1065,109 +1176,13 @@ if prompt := st.chat_input(placeholder_text):
                         )
                     else:
 
-                        # Use unified prompt template for metadata queries with table format
-                        prompt_template = """You are an expert in epidemiology and aging research, specializing in cohort study metadata. CRITICAL: Do NOT invent or hallucinate data. Only use information explicitly provided in NEAR metadata below.
-
-                COHORT BACKGROUND:
-                {cohort_background}
-
-                ---
-
-                Your task is to answer questions about variables and metadata from this cohort.
-
-                ### NEAR metadata (ONLY SOURCE OF TRUTH):
-                Each block below represents one retrieved variable definition.
-                Each block begins with a header in this format:
-                [Source: source_file_name | Variable: variable_name]
-                {context}
-
-                ### Question from user:
-                {question}
-
-                ### Your Response Instructions:
-                - Treat every question as a single-turn request based only on the current question and provided metadata context
-                - DO NOT include follow-up offers such as "If you want, I can...", "Would you like me to...", or "I can also..."
-                - Group related variables by theme
-                - Start with a clear, natural explanation of the topic based on the related cohort background
-                - Use your own words to describe what the variables measure
-                - Then, present the variable information in a markdown table with these columns:
-                
-                | Variable Name | Label | Categories | Source |
-                |---|---|---|---|
-                | variable_name | What it measures in plain English | Category values if applicable | source_file_name |
-                
-                ================================================================
-                CRITICAL RULES FOR EXTRACTING DATA (READ CAREFULLY):
-                ================================================================
-                
-                1. VARIABLE NAMES (Column 1):
-                   - EXTRACT EXACTLY the text that appears after "Variable: " in the source data
-                   - Copy-paste the exact variable name - do NOT modify, shorten, or translate
-                   - Do NOT use field names like "Description" or "Label" instead
-                   - FORBIDDEN: Do NOT invent variable names not in the source
-                   - EXAMPLE RIGHT: Source has "Variable: löpnr". Write "löpnr" exactly
-                   - EXAMPLE WRONG: Inventing "participant_age" when source only has "löpnr"
-
-                2. LABELS (Column 2):
-                   - Use the "Label:" field value EXACTLY as written in source data
-                   - Do NOT shorten, paraphrase, or interpret the label
-
-                3. CATEGORIES (Column 3):
-                   - Extract category values EXACTLY as they appear in the source data, typically in a "Categories:" field
-                   - FORMAT STRICTLY as: "1=value1, 2=value2, 3=value3" (number=description, comma-separated, NO SEMICOLONS)
-                   - If no categories exist, write "N/A"
-                   - Do NOT invent category mappings not in the source
-
-                4. SOURCE (Column 4):
-                   - Extract from the header "[Source: filename | Variable: variable_name]" at the start of each block
-                   - Must be present for EVERY variable (required field)
-                   - Use the exact source filename provided
-
-                5. DEDUPLICATION:
-                   - Variables with identical Label and Categories are the same variable collected across different time points
-                   - COMBINES these into a single row with all variable names and sources listed
-                   - This provides visibility into data collection across waves while avoiding redundancy
-
-                6. VALIDATION (CRITICAL - MUST FOLLOW):
-                   - EVERY row must have ALL 4 columns completely filled (NO EMPTY CELLS)
-                   - NEVER pad rows with empty cells or partial data
-                   - Every variable name must come from the source data
-                   - If data is missing from source, DO NOT hallucinate it
-                   - Double-check: Each variable in your table should be traceable to the source context
-                   - If the last row is incomplete, DELETE IT and end the table cleanly
-                
-                DETAILED EXAMPLES OF CORRECT FORMAT:
-                
-                Example 1 - Demographics in SNAC-K:
-                "In SNAC-K, several variables measure basic demographics. Each participant has a unique identifier and recorded biological sex."
-                
-                | Variable Name | Label | Categories | Source |
-                |---|---|---|---|
-                | löpnr | Unique participant identifier number | N/A | SNAC_K_Baseline |
-                | kön | Participant's biological sex | 1=man, 2=woman | SNAC_K_Baseline |
-                
-                Example 2 - Physical Measurements:
-                "Height and weight are measured at baseline assessment."
-                
-                | Variable Name | Label | Categories | Source |
-                |---|---|---|---|
-                | height_cm | Height in centimeters | N/A | H70_Baseline_Form |
-                | weight_kg | Body weight in kilograms | N/A | H70_Baseline_Form |
-
-                Answer:"""
-
-                        PROMPT = PromptTemplate(
-                            template=prompt_template, 
-                            input_variables=["cohort_background", "context", "question"]
-                        )
-
                         rag_chain = (
                             {
                                 "cohort_background": lambda user_query: get_relevant_background(user_query, vectorstore, context_docs),
                                 "context": lambda _: context,
                                 "question": RunnablePassthrough()
                             }
-                            | PROMPT
+                                     | METADATA_PROMPT
                             | llm
                             | StrOutputParser()
                         )
