@@ -213,65 +213,33 @@ METADATA_PROMPT = PromptTemplate(
 # ── Functions ─────────────────────────────────────────────────────────────────
 
 def _find_table_blocks(text):
-    """Find all table blocks in text and return their components.
+    """Find all markdown table blocks in text.
     
     Args:
         text: String potentially containing markdown tables
     
     Returns:
-        List of dicts with keys:
-        - 'before_lines': Text lines before this table
-        - 'header': Header line (text directly before table)
-        - 'table_lines': The markdown table lines
+        List of table blocks, where each block is a list of markdown table lines.
     """
     lines = text.split('\n')
-    blocks = []
+    table_blocks = []
     current_table = []
-    last_header = None
-    before_lines = []
-    
-    for i, original_line in enumerate(lines):
+
+    for original_line in lines:
         line = original_line.strip()
-        is_header = False
-        
-        # Look for header (non-table text followed by table)
-        if line and not line.startswith('|') and i + 1 < len(lines):
-            next_line = lines[i + 1].strip()
-            if next_line.startswith('|'):
-                last_header = original_line
-                is_header = True
-        
-        # Check if this is a table line
+
         if line.startswith('|') and line.endswith('|'):
             current_table.append(line)
-        else:
-            # End of table - save it
-            if current_table:
-                blocks.append({
-                    'before_lines': before_lines,
-                    'header': last_header,
-                    'table_lines': current_table,
-                    'after_line': original_line
-                })
-                current_table = []
-                last_header = None
-                before_lines = []
-            elif not is_header:
-                # Don't add to before_lines if this line will be used as header
-                before_lines.append(original_line)
-    
-    # Handle final table if present
+            continue
+
+        if current_table:
+            table_blocks.append(current_table)
+            current_table = []
+
     if current_table:
-        blocks.append({
-            'before_lines': before_lines,
-            'header': last_header,
-            'table_lines': current_table,
-            'after_line': None
-        })
-    else:
-        before_lines.append(None)  # Track remaining lines
-    
-    return blocks
+        table_blocks.append(current_table)
+
+    return table_blocks
 
 
 
@@ -319,32 +287,30 @@ def _parse_markdown_table(table_lines):
         return None
     
 def extract_markdown_tables(text):
-    """Extract markdown tables from text, handling multiple tables with headers.
+    """Extract markdown tables from text.
     
     Args:
         text: String containing markdown tables
     
     Returns:
-        List of tuples: (table_header_text, DataFrame) for each table found
+        List of pandas DataFrames, one per table found
     """
-    tables_with_headers = []
-    blocks = _find_table_blocks(text)
-    
-    for block in blocks:
-        df = _parse_markdown_table(block['table_lines'])
+    tables = []
+
+    for table_lines in _find_table_blocks(text):
+        df = _parse_markdown_table(table_lines)
         if df is not None and not df.empty:
-            header = block['header'] or f"Table {len(tables_with_headers) + 1}"
-            tables_with_headers.append((header, df))
-    
-    return tables_with_headers
+            tables.append(df)
+
+    return tables
 
 
 
-def export_tables_to_excel(tables_with_headers):
+def export_tables_to_excel(tables):
     """Export multiple DataFrames to Excel file with formatted sheets.
     
     Args: 
-        tables_with_headers: List of (header_text, DataFrame) tuples
+        tables: List of DataFrames
     
     Returns:
         BytesIO object containing the Excel file
@@ -352,16 +318,9 @@ def export_tables_to_excel(tables_with_headers):
     output = BytesIO()
     
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        for idx, (header, df) in enumerate(tables_with_headers):
-            # Create sheet name from header (max 31 chars for Excel)
-            # Remove markdown formatting (remove leading ### or ##, etc)
-            if header:
-                clean_header = re.sub(r'^#+\s*', '', header).strip()
-                sheet_name = clean_header[:31] if clean_header else f"Table {idx + 1}"
-            else:
-                sheet_name = f"Table {idx + 1}"
-            # Sanitize sheet name (remove invalid characters)
-            sheet_name = re.sub(r'[\\/:*?"<>|]', '_', sheet_name)
+        for idx, df in enumerate(tables):
+            # Use simple deterministic sheet names to avoid fragile header parsing.
+            sheet_name = f"Table {idx + 1}"
             
             df.to_excel(writer, sheet_name=sheet_name, index=False)
             
@@ -627,10 +586,6 @@ if "vectorstore" not in st.session_state:
 if "vectorstores_cache" not in st.session_state:
     st.session_state.vectorstores_cache = {}
     st.session_state.vectorstores_loading = False
-
-# Initialize latest response tables for export
-if "latest_tables_with_headers" not in st.session_state:
-    st.session_state.latest_tables_with_headers = []
 
 # Initialize selected LLM model
 if "selected_llm_model" not in st.session_state:
@@ -1104,7 +1059,7 @@ with col1:
     st.caption("- How is sleep measured?")
     st.caption("- What social engagement data do you have?")
 with col2:
-    st.caption("- What nutrition data is available?")
+    st.caption("- What nutrition and dietary related variables are available?")
     st.caption("- Recommend variables for constructing CIRS.")
     st.caption("- Suggest variables for frailty index.")
 with col3:
@@ -1236,14 +1191,13 @@ if prompt := st.chat_input(placeholder_text):
         st.markdown(response_with_hint)
         
         # Extract tables from response and enable download if found
-        tables_with_headers = extract_markdown_tables(response)
-        st.session_state.latest_tables_with_headers = tables_with_headers
+        tables = extract_markdown_tables(response)
         
         # Add download button if tables were found
-        if tables_with_headers:
-            excel_file = export_tables_to_excel(tables_with_headers)
+        if tables:
+            excel_file = export_tables_to_excel(tables)
             st.download_button(
-                label=f"📥 Download as Excel ({len(tables_with_headers)} table{'s' if len(tables_with_headers) > 1 else ''})",
+                label=f"📥 Download as Excel ({len(tables)} table{'s' if len(tables) > 1 else ''})",
                 data=excel_file,
                 file_name=f"NEARchatbot_{st.session_state.selected_database}_{pd.Timestamp.now().strftime('%y%m%d_%H%M%S')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
