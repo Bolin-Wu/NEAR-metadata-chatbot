@@ -423,7 +423,7 @@ def initialize_production_db(chroma_db: str, hf_repo_id: str, zip_filename: str)
         progress_placeholder.info("📥 Downloading production database from HuggingFace Hub...")
 
         # ─ Download the database zip file ──────────────────────────────────────
-        # Downloads chroma_prod_db.zip from the configured HuggingFace dataset
+        # Downloads the configured Chroma database zip from HuggingFace dataset
         # File is cached in ~/.cache/huggingface to avoid re-downloading
         try:
             zip_path = hf_hub_download(
@@ -455,7 +455,7 @@ def initialize_production_db(chroma_db: str, hf_repo_id: str, zip_filename: str)
             # ─ Handle different zip structures ─────────────────────────────────
             # The zip file might contain either:
             # A) Direct contents: chroma.sqlite3, UUID folders, etc. (typical case)
-            # B) Wrapped: A single "chroma_prod_db" folder containing everything
+            # B) Wrapped: A single "chroma_azure_db" folder containing everything
             #
             # We need to handle both cases to find the correct source path
             if "chroma_azure_db" in extracted_contents and len(extracted_contents) == 1:

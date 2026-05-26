@@ -1,7 +1,7 @@
 """Compare semantic retrieval behavior across two embedding models.
 
 This script is designed for the NEAR aging metadata project and compares:
-- sentence-transformers/all-MiniLM-L6-v2 on ./chroma_prod_db
+- sentence-transformers/all-MiniLM-L6-v2 on ./chroma_azure_db
 - text-embedding-3-small on ./chroma_azure_db
 
 It runs one or more queries and prints side-by-side top results (up to 3)
@@ -25,7 +25,7 @@ from langchain_openai import OpenAIEmbeddings
 
 HF_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 OPENAI_MODEL_NAME = "text-embedding-3-small"
-HF_DB_DEFAULT = "./chroma_prod_db"
+HF_DB_DEFAULT = "./chroma_azure_db"
 OPENAI_DB_DEFAULT = "./chroma_azure_db"
 DEFAULT_QUERIES_FILE = "scripts/evaluation/aging_semantic_queries.json"
 DEFAULT_K = 8

@@ -62,5 +62,5 @@ uv run python scripts/evaluation/compare_embedding_models.py \
 
 Defaults:
 
-- Model A: `sentence-transformers/all-MiniLM-L6-v2` with `./chroma_prod_db`
-- Model B: `text-embedding-3-small` with `./chroma_azure_db`
+- Model A: `sentence-transformers/all-MiniLM-L6-v2`
+- Model B: `text-embedding-3-small`

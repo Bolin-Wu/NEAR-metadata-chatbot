@@ -4,7 +4,7 @@ from langchain_chroma import Chroma
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-CHROMA_DB = "./chroma_prod_db"
+CHROMA_DB = "./chroma_azure_db"
 DATABASE = "SNAC-N"  # Change this to inspect different collections
 
 # ── Main ──────────────────────────────────────────────────────────────────────

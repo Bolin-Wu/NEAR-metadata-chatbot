@@ -19,7 +19,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 
 
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-DEFAULT_CHROMA_DB = "./chroma_prod_db"
+DEFAULT_CHROMA_DB = "./chroma_azure_db"
 DEFAULT_RESULT_K = 10
 
 

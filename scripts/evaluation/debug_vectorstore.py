@@ -1,20 +1,17 @@
 """Debug script to inspect what's in the vector store."""
 
-import os
-from pathlib import Path
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-CHROMA_DEMO_DB = "./chroma_demo_db"
-CHROMA_PROD_DB = "./chroma_prod_db"      # Production (cloud storage)
+CHROMA_DB = "./chroma_azure_db"      # Production (cloud storage)
 
 print("Loading embeddings...")
 embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
 
 print("Loading vector store...")
 vectorstore = Chroma(
-    persist_directory=CHROMA_PROD_DB,
+    persist_directory=CHROMA_DB,
     embedding_function=embeddings,
     collection_name="xml_metadata"
 )

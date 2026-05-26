@@ -17,7 +17,7 @@ chroma_azure_db/
 # Data & indexes
 metadata_excels/
 *.xlsx  
-data/
+data_maelstrom_latest/
 data_2026April/
 *.zip
 
