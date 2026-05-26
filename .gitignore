@@ -21,6 +21,9 @@ data_maelstrom_latest/
 data_2026April/
 *.zip
 
+#backup
+backup/
+
 
 # OS
 .DS_Store

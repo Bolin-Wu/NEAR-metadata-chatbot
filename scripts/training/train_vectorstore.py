@@ -41,9 +41,9 @@ JSON_CHUNK_SIZE = 1200
 JSON_CHUNK_OVERLAP = 200
 
 # Functions ─────────────────────────────────────────────────────────────────
-def get_embeddings():
+def get_embeddings(model_name: str = EMBEDDING_MODEL):
     return AzureOpenAIEmbeddings(
-        azure_deployment=EMBEDDING_MODEL,
+        azure_deployment=model_name,
         azure_endpoint=AZURE_openai_endpoint,
         api_key=AZURE_api_key,
         api_version=AZURE_EMBEDDING_API_VERSION,
