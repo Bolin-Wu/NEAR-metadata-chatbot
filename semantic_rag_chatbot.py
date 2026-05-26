@@ -55,7 +55,7 @@ DATA_ROOT = "./data"
 # Known databases (hardcoded as fallback when data/ folder not available)
 KNOWN_DATABASES = [
     "Betula", "GAS_SNAC_S", "GENDER", "H70", "KP", 
-    "OCTO-Twin", "SATSA", "SNAC-B", "SNAC-K", "SNAC-N", "SWEOLD", "TryBo"
+    "OCTO-Twin", "SATSA", "SNAC-B", "SNAC-K", "SNAC-N", "SWEOLD", "TryBo", "ULSAM"
 ]
 
 # LLM Model Names (for consistency across the app)
