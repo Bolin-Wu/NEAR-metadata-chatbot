@@ -268,7 +268,7 @@ if __name__ == "__main__":
             f"   python -c \"import shutil; shutil.make_archive('{archive_name}', 'zip', '.', '{archive_name}')\""
         )
         print(
-            f"   hf upload bobo200612/near-chroma-prod-db ./{archive_name}.zip {archive_name}.zip --repo-type=dataset --commit-message 'xxxxx'"
+            f"   hf upload bobo200612/near-chroma-azure-db ./{archive_name}.zip {archive_name}.zip --repo-type=dataset --commit-message 'xxxxx'"
         )
             
     except Exception as e:
