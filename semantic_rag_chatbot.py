@@ -50,7 +50,7 @@ DATA_ROOT = "./data"
 # Known databases (hardcoded as fallback when data/ folder not available)
 KNOWN_DATABASES = [
     "Betula", "GAS_SNAC_S", "GENDER", "H70", "KP", 
-    "OCTO-Twin", "SALT", "SATSA", "SNAC-B", "SNAC-K", "SNAC-N", "SWEOLD", "TryBo"
+    "OCTO-Twin", "SALT", "SATSA", "SNAC-B", "SNAC-K", "SNAC-N", "SWEOLD", "TryBo", "ULSAM"
 ]
 
 # LLM Model Names (for consistency across the app)
@@ -58,7 +58,6 @@ LLM_MODEL_GPT = "GPT-5.4 Mini (Azure Foundry)"
 
 # LLM Model IDs (technical identifiers for API calls)
 GPT_MODEL_ID = "gpt-5.4-mini"
-AZURE_FOUNDRY_BASE_URL = "https://llm-chatbot-api.cognitiveservices.azure.com/openai/v1/"
 
 # LLM Hyperparameters
 LLM_TEMPERATURE = 0.3           # Balanced: accurate answers with flexibility for general knowledge (0.0=deterministic, 1.0=creative)
@@ -86,6 +85,11 @@ try:
     AZURE_openai_endpoint = st.secrets["AZURE_openai_endpoint"]
 except (FileNotFoundError, KeyError, AttributeError):
     AZURE_openai_endpoint = os.getenv("AZURE_openai_endpoint")
+
+try:
+    AZURE_FOUNDRY_BASE_URL = st.secrets["AZURE_FOUNDRY_BASE_URL"]
+except (FileNotFoundError, KeyError, AttributeError):
+    AZURE_FOUNDRY_BASE_URL = os.getenv("AZURE_openai_endpoint")
     
 
 # Cloud storage repo for vector database artifacts.
@@ -852,6 +856,11 @@ def get_llm():
     if not AZURE_api_key:
         st.error("❌ AZURE_api_key not configured")
         st.stop()
+    if not AZURE_FOUNDRY_BASE_URL:
+        st.error(
+            "❌ Missing AZURE_FOUNDRY_BASE_URL. Configure it in Streamlit secrets or environment variables."
+        )
+        st.stop()
     return ChatOpenAI(
         api_key=AZURE_api_key,
         model=GPT_MODEL_ID,
@@ -1093,7 +1102,7 @@ if prompt := st.chat_input(placeholder_text):
                 llm = get_llm()
                 
                 # Display which model is being used
-                st.caption(f"🔧 Using: {LLM_MODEL_GPT}")
+                st.caption(f"🔧 Using: {LLM_MODEL_GPT}, {EMBEDDING_MODEL}")
                 
                 # Get context merged from selected database collections.
                 # Returns both context text and document list
@@ -1350,7 +1359,7 @@ if prompt := st.chat_input(placeholder_text):
         if selected_db_names and response:
             selected_db_label = ", ".join(selected_db_names)
             response_with_hint = (
-                f"📍 **{selected_db_label}** · 🔎 Embeddings: **{EMBEDDING_MODEL}**\n\n{response}"
+                f"📍 **{selected_db_label}** \n\n{response}"
             )
         else:
             response_with_hint = response
