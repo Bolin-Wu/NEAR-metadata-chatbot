@@ -21,7 +21,8 @@ metadata_excels/
 data/
 data_2026April/
 *.zip
-
+backup/
+data_maelstrom_latest/
 
 # OS
 .DS_Store
