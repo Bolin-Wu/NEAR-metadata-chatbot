@@ -1349,7 +1349,9 @@ if prompt := st.chat_input(placeholder_text):
         
         if selected_db_names and response:
             selected_db_label = ", ".join(selected_db_names)
-            response_with_hint = f"📍 **{selected_db_label}**\n\n{response}"
+            response_with_hint = (
+                f"📍 **{selected_db_label}** · 🔎 Embeddings: **{EMBEDDING_MODEL}**\n\n{response}"
+            )
         else:
             response_with_hint = response
         
