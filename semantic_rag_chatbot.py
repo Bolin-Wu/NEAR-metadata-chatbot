@@ -1102,7 +1102,7 @@ if prompt := st.chat_input(placeholder_text):
                 llm = get_llm()
                 
                 # Display which model is being used
-                st.caption(f"🔧 Using: {LLM_MODEL_GPT}, {EMBEDDING_MODEL}")
+                st.caption(f"🔧 Using: {LLM_MODEL_GPT} | {EMBEDDING_MODEL}")
                 
                 # Get context merged from selected database collections.
                 # Returns both context text and document list
@@ -1205,27 +1205,16 @@ if prompt := st.chat_input(placeholder_text):
                          - NEVER place a variable into a different database's table than the input section where it appears
                          - The Source field still includes the database prefix as a secondary check: "[Source: DATABASE:filename | ...]"
 
-                     6. DEDUPLICATION:
+                     6. DEDUPLICATION within databases:
                          - Within the SAME database, merge variables into one row ONLY if BOTH Label and Categories are exactly identical
                          - If either Label or Categories differs, keep them as separate rows (even if conceptually similar)
-                         - In merged rows, list all variable names and sources that meet the exact-match rule
-
-                     6A. NO FUZZY MATCHING FOR DEDUP:
-                         - Do NOT normalize, relax, or approximate Label/Categories when deciding grouping
-                         - Minor wording, spacing, punctuation, or ordering differences mean NOT equal for grouping
-
-                     6B. REQUIRED TWO-PASS WORKFLOW (INTERNAL REASONING, THEN OUTPUT):
-                         - PASS 1 (per database): build groups using exact pair key = (Label text, Categories text)
-                         - PASS 2 (per database): render the markdown table from concept groups only
-                         - HARD CHECK before finalizing each database table: merge rows only when exact pair key is identical
-                         - HARD CHECK for completeness: every variable used in PASS 1 must appear in exactly one final grouped row
+                         - In merged rows, list all variable names and sources that meet the exact-match rule in the same cell, separated by commas
 
                      7. VALIDATION (CRITICAL - MUST FOLLOW):
                          - EVERY row must have ALL 4 columns completely filled (NO EMPTY CELLS)
                          - NEVER pad rows with empty cells or partial data
                          - Every variable name must come from the source data
                          - If data is missing from source, DO NOT hallucinate it
-                         - For each database, DO NOT output duplicate rows with the same exact (Label, Categories) pair
                          - If a Label or Categories value cannot be quoted exactly from provided context, use the explicit fallback strings above instead of guessing
 
                     8. HARMONIZATION ACROSS DATABASES (ONLY WHEN MULTIPLE DATABASES ARE SELECTED):
