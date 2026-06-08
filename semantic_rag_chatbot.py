@@ -67,7 +67,6 @@ LLM_MODEL_XAI_GROK = "Grok 4.1 Fast Reasoning"
 GROQ_MODEL_ID = "llama-3.1-8b-instant"
 GPT_MODEL_ID = "gpt-5.4-mini"
 XAI_GROK_MODEL_ID = "grok-4-1-fast-reasoning"
-AZURE_FOUNDRY_BASE_URL = "https://llm-chatbot-api.cognitiveservices.azure.com/openai/v1/"
 XAI_BASE_URL = "https://api.x.ai/v1/"
 
 # LLM Hyperparameters
@@ -99,6 +98,11 @@ try:
     AZURE_openai_endpoint = st.secrets["AZURE_openai_endpoint"]
 except (FileNotFoundError, KeyError, AttributeError):
     AZURE_openai_endpoint = os.getenv("AZURE_openai_endpoint")
+
+try:
+    AZURE_FOUNDRY_BASE_URL = st.secrets["AZURE_FOUNDRY_BASE_URL"]
+except (FileNotFoundError, KeyError, AttributeError):
+    AZURE_FOUNDRY_BASE_URL = os.getenv("AZURE_FOUNDRY_BASE_URL")
 
 try:
     XAI_api_key = st.secrets["XAI_api_key"]
